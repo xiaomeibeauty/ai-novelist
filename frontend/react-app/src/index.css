@@ -1,0 +1,25 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0; /* 确保没有默认的内边距 */
+}
+
+body {
+  font-family: sans-serif; /* 使用最安全的默认字体 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+  color: var(--text-color-primary); /* 调整代码块颜色 */
+}
+
+h1, h2 {
+    color: var(--text-color-primary); /* 使用主题变量 */
+}

@@ -1,0 +1,51 @@
+{
+  "name": "ai-novelist-react",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^6.7.2",
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
+    "@fortawesome/react-fontawesome": "^0.2.2",
+    "@reduxjs/toolkit": "^2.8.2",
+    "@tiptap/core": "^2.6.2",
+    "@tiptap/extension-text": "^2.6.2",
+    "@tiptap/pm": "^2.6.2",
+    "@tiptap/starter-kit": "^2.6.2",
+    "concurrently": "^9.1.2",
+    "electron": "^36.3.2",
+    "electron-is-dev": "^2.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-redux": "^9.2.0",
+    "react-resizable-panels": "^3.0.2",
+    "react-scripts": "5.0.1",
+    "tiptap-markdown": "^0.8.10",
+    "wait-on": "^8.0.3"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "main": "public/electron.js",
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "electron-proxy-test",
+  "version": "1.0.0",
+  "description": "A simple Electron app to test DeepSeek API without proxy.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "electron": "^29.0.0",
+    "openai": "^4.0.0"
+  }
+}

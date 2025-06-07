@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        #chatDisplay {
+            border: 1px solid #ccc;
+            background-color: #fff;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .message {
+            margin-bottom: 8px;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        .user {
+            background-color: #e6f7ff;
+            text-align: right;
+            color: #333;
+        }
+        .ai {
+            background-color: #f0f0f0;
+            text-align: left;
+            color: #333;
+        }
+        .error {
+            background-color: #ffe6e6;
+            color: #ff0000;
+        }
+        .chat-message.system-message {
+            background-color: #f0f0f0; /* 浅灰色背景 */
+            border-left: 5px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-size: 0.9em; /* 比普通消息小一点 */
+            color: #555;
+        }
+
+        .chat-message.system-message .message-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .chat-message.system-message.tool-success {
+            background-color: #e6ffe6; /* 浅绿色背景 */
+            border-left-color: #66cc66; /* 绿色边框 */
+            color: #006600; /* 深绿色文字 */
+            font-size: 1.1em; /* 稍微大一点，突出显示 */
+        }
+
+        .chat-message.system-message.tool-failure {
+            background-color: #ffe6e6; /* 浅红色背景 */
+            border-left-color: #ff6666; /* 红色边框 */
+            color: #cc0000; /* 深红色文字 */
+            font-size: 1.1em; /* 稍微大一点，突出显示 */
+        }
+        .tool-suggestion {
+            background-color: #e0ffe0; /* 浅绿色背景 */
+            border: 1px solid #aaffaa;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+        .tool-actions button {
+            margin-right: 5px;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #4CAF50; /* 确认按钮绿色 */
+            color: white;
+        }
+        .tool-actions button:hover {
+            opacity: 0.9;
+        }
+        .tool-actions button:last-child {
+            background-color: #f44336; /* 取消按钮红色 */
+        }
+        .tool-suggestion.executed {
+            background-color: #d4edda; /* 执行后更深的绿色 */
+            border-color: #28a745;
+            opacity: 0.7;
+        }
+        .tool-suggestion.cancelled {
+            background-color: #f8d7da; /* 取消后更深的红色 */
+            border-color: #dc3545;
+            opacity: 0.7;
+        }
+        .task-end {
+            background-color: #d4edda; /* 成功绿色 */
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        /* Tool Suggestion - Parameter Details Styling */
+        .tool-params-details {
+            margin-top: 5px;
+            border: 1px solid #cceeff; /* 浅蓝色边框 */
+            border-radius: 4px;
+            background-color: #f0f8ff; /* 更浅的蓝色背景 */
+            padding: 5px;
+        }
+
+        .tool-params-details summary {
+            cursor: pointer;
+            outline: none; /* 移除点击时的焦点边框 */
+            list-style: none; /* 移除默认的箭头 */
+            display: flex;
+            align-items: center;
+            font-weight: bold;
+            color: #0056b3; /* 蓝色文字 */
+            padding: 2px 0;
+        }
+
+        /* 自定义折叠图标 */
+        .tool-params-details summary .collapse-icon {
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid #0056b3; /* 初始倒三角形，顶端朝下 */
+            margin-left: 5px;
+            transition: transform 0.2s ease; /* 平滑过渡 */
+        }
+
+        .tool-params-details[open] summary .collapse-icon {
+            transform: rotate(-180deg); /* 展开时旋转 180 度，顶端朝上 */
+            border-top: 5px solid #0056b3; /* 展开后仍然是朝上的三角形 */
+        }
+        
+        .tool-params-details pre {
+            background-color: #e9ecef;
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto; /* 参数过长时可滚动 */
+            white-space: pre-wrap; /* 自动换行 */
+            word-break: break-all; /* 单词内部断行 */
+            max-height: 200px; /* 限制高度，避免过长 */
+        }
+
+        .tool-params-details code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            color: #333;
+        }
+    </style>
+    <title>AI Novelist MVP</title>
+</head>
+<body>
+    <h1>AI Novelist MVP</h1>
+    <p>当前文件: <span id="currentFile">未选择</span></p>
+
+    <h2>小说正文</h2>
+    <textarea id="novelContent" style="width: 80%; height: 300px;"></textarea>
+
+    <h2>用户与 AI 交互</h2>
+    <div id="chatDisplay" style="width: 80%; height: 200px; border: 1px solid black; overflow-y: scroll;"></div>
+
+    <!-- 新增：用于显示批量工具建议的容器 -->
+    <div id="batch-tool-suggestions-container" style="display: none; border: 1px solid #ccc; padding: 10px; margin-top: 10px; background-color: #f9f9f9; border-radius: 5px;">
+        <p style="font-weight: bold;">AI 建议执行以下多项操作：请逐一确认或取消。</p>
+        <div class="tool-cards-wrapper">
+            <!-- 工具卡片将在这里动态加载 -->
+        </div>
+        <div class="batch-actions" style="margin-top: 10px;">
+            <button class="approve-all-button">批量批准</button>
+            <button class="reject-all-button">批量拒绝</button>
+        </div>
+    </div>
+
+    <input type="text" id="chatInput" style="width: 70%;" placeholder="输入指令...">
+    <button id="sendMessage">发送</button>
+
+    <script src="./renderer.js"></script>
+</body>
+</html>

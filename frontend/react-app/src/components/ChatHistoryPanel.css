@@ -1,0 +1,104 @@
+.chat-history-panel {
+    position: absolute;
+    top: 80px; /* 从顶部操作区底部开始 */
+    right: 0;
+    width: 100%; /* 占据父容器的全部宽度 */
+    height: calc(100% - 70px); /* 覆盖聊天内容区和指令输入区 */
+    background-color: #333333; /* 深灰色背景 */
+    border-left: 1px solid #222222; /* 深色边框 */
+    box-shadow: -2px 0 5px rgba(0,0,0,0.3); /* 调整阴影 */
+    padding: 10px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    z-index: 1000; /* 确保在其他内容之上 */
+}
+
+.chat-history-panel h3 {
+    text-align: center;
+    margin-bottom: 15px;
+    color: #eeeeee; /* 浅色文字 */
+}
+
+/* 关闭按钮样式 */
+.close-history-panel-button {
+    position: absolute;
+    top: 10px; /* 距离顶部 */
+    right: 10px; /* 距离右侧 */
+    background: none;
+    border: none;
+    color: #eeeeee; /* 按钮颜色 */
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1; /* 确保文字垂直居中 */
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    transition: background-color 0.2s ease;
+}
+
+.close-history-panel-button:hover {
+    background-color: #555555; /* hover 时的背景色 */
+}
+
+.history-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.no-history-message {
+    text-align: center;
+    color: #cccccc; /* 浅灰色文字 */
+    margin-top: 20px;
+}
+
+.history-item {
+    background-color: #555555; /* 灰色背景 */
+    border: 1px solid #666666; /* 灰色边框 */
+    margin-bottom: 8px;
+    padding: 10px;
+    border-radius: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.history-item:hover {
+    background-color: #777777; /* 更深的灰色 hover */
+    border-color: #888888;
+}
+
+.history-text {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 10px; /* 为删除按钮留出空间 */
+    color: #eeeeee; /* 浅色文字 */
+}
+
+.delete-button {
+    background-color: var(--panel-bg-color); /* 改为深灰色系 */
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    flex-shrink: 0; /* 防止按钮被压缩 */
+}
+
+.delete-button:hover {
+    background-color: var(--hover-bg-color); /* 改为悬停背景色 */
+}

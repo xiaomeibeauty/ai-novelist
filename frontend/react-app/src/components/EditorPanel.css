@@ -1,0 +1,102 @@
+/* EditorPanel.css */
+
+.editor-panel-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: var(--border-radius-medium); /* 使用全局间距变量 */
+    background-color: var(--panel-bg-color);
+}
+
+
+.title-bar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.unsaved-indicator {
+    color: var(--text-color-light); /* 改为浅灰色 */
+    font-size: 1.5em;
+    font-weight: bold;
+    margin-left: 5px;
+}
+
+.novel-title-input {
+    flex-grow: 1; /* 占据可用空间 */
+    padding: 8px 10px;
+    font-size: 1.5em;
+    font-weight: bold;
+    color: var(--text-color-primary);
+    background-color: var(--panel-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-small);
+    box-sizing: border-box;
+    outline: none;
+    margin-right: 10px; /* 与按钮的间距 */
+}
+
+.novel-title-input:focus {
+    border-color: var(--primary-color); /* 聚焦时的边框颜色 */
+    box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.2); /* 聚焦时的阴影 */
+}
+
+.new-chapter-button {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius-small);
+    padding: 8px 12px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.new-chapter-button:hover {
+    background-color: var(--primary-color-dark);
+}
+
+.tiptap-editor {
+    flex-grow: 1; /* 让编辑器占据剩余空间 */
+    border: 1px solid var(--border-color); /* 添加边框 */
+    border-radius: var(--border-radius-small); /* 添加圆角 */
+    overflow-y: auto; /* 确保内容不溢出 */
+    padding: 10px;
+}
+
+/* 移除 Tiptap 编辑器聚焦时的默认轮廓 */
+.ProseMirror:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+    position: fixed;
+    background-color: var(--panel-bg-color); /* 改为深色背景 */
+    border: 1px solid var(--border-color); /* 改为深色边框 */
+    box-shadow: var(--shadow-medium); /* 改为深色阴影 */
+    z-index: 1000;
+    min-width: 120px;
+}
+
+.context-menu-item {
+    padding: 8px 15px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: var(--text-color-primary); /* 改为浅色文字 */
+}
+
+.context-menu-item:hover {
+    background-color: var(--hover-bg-color); /* 改为悬停背景色 */
+}
+
+.context-menu-item.disabled {
+    color: #b0b0b0;
+    cursor: not-allowed;
+    background-color: var(--panel-bg-color-alt); /* 改为深灰色系 */
+}
+
+.context-menu-item.disabled:hover {
+    background-color: var(--panel-bg-color-alt); /* 禁用状态下悬停无变化 */
+}
