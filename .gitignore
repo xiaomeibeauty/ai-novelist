@@ -33,4 +33,4 @@ mcp-filesystem-server.lock
 
 # Other ignored files
 *.bak
-*.md
+/*.md
