@@ -3,8 +3,8 @@ const logger = require('../../../frontend/mvp/utils/logger');
 const path = require('path');
 const tools = require('../../tool-service/tools/definitions');
 const { state } = require('../../state-manager'); // 引入共享状态
-const Store = require('electron-store').default; // 引入 electron-store
-const store = new Store(); // 创建 Store 实例
+// Store 实例将异步创建
+let storeInstance = null;
 const { getFileTree } = require('../../utils/file-tree-builder'); // 引入文件树构建工具
 
 // 工具服务通过参数传入
@@ -18,8 +18,13 @@ function setToolService(toolService) {
 const https = require('https');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
-function getOpenAIClient() {
-  const deepseekApiKey = store.get('deepseekApiKey'); // 从 electron-store 获取 API Key
+async function getOpenAIClient() {
+  if (!storeInstance) {
+    const StoreModule = await import('electron-store');
+    const Store = StoreModule.default;
+    storeInstance = new Store();
+  }
+  const deepseekApiKey = storeInstance.get('deepseekApiKey'); // 从 electron-store 获取 API Key
   if (!deepseekApiKey) {
     console.warn('[DeepSeek] DeepSeek API Key 未设置。');
     // 直接向前端发送错误消息，不再抛出错误，而是返回 null
@@ -66,7 +71,7 @@ async function chatWithDeepSeek(latestUserMessageContent) { // 修改参数名�
   console.log(`[DeepSeek] 开始处理用户消息 (来自前端历史): ${latestUserMessageContent}`);
 
   try {
-    const openaiClient = getOpenAIClient(); // 获取带有最新 API Key 的客户端
+    const openaiClient = await getOpenAIClient(); // 获取带有最新 API Key 的客户端
     if (!openaiClient) { // 如果 API Key 未设置，getOpenAIClient 会返回 null
         console.warn('[DeepSeek] chatWithDeepSeek: API Key 未设置，无法进行对话。');
         // 返回一个明确的错误对象，以便调用方处理
@@ -281,7 +286,7 @@ async function chatWithDeepSeek(latestUserMessageContent) { // 修改参数名�
 // 将工具执行结果发送给 DeepSeek
 async function sendToolResultToDeepSeek(toolResultsArray) { // 移除 messagesBeforeToolCall 参数
     try {
-        const openaiClient = getOpenAIClient();
+        const openaiClient = await getOpenAIClient();
         if (!openaiClient) {
             console.warn('[DeepSeek] sendToolResultToDeepSeek: API Key 未设置，无法进行工具结果处理。');
             return { type: 'error', payload: 'DeepSeek API Key 未设置，无法进行工具结果处理。' };

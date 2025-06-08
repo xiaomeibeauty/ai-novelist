@@ -1,10 +1,13 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, protocol, net } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
-const Store = require('electron-store').default;
-const store = new Store();
 const fs = require('fs').promises;
 const { throttle } = require('lodash');
+
+// 必须在 app.ready 事件之前注册协议
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, bypassCSP: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true } }
+]);
 
 const {
   register: registerIpcHandlers,
@@ -80,7 +83,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
-      contentSecurityPolicy: "default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:3000; worker-src 'self' blob:;",
+      contentSecurityPolicy: "default-src 'self' app: 'unsafe-inline' data:; script-src 'self' app: 'unsafe-eval' 'unsafe-inline' blob:; style-src 'self' app: 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://localhost:3000; worker-src 'self' blob:;",
     },
     titleBarStyle: 'hidden',
     titleBarOverlay: {
@@ -92,7 +95,7 @@ function createWindow() {
 
   const startUrl = isDev
     ? 'http://localhost:3000'
-    : `file://${path.join(__dirname, 'frontend/react-app/build/index.html')}`;
+    : `app://./index.html`;
 
   mainWindow.loadURL(startUrl);
 
@@ -196,8 +199,20 @@ const throttledGetChaptersAndUpdateFrontend = throttle(async (windowInstance) =>
   }
 }, 1000);
 
+let store; // 将 store 声明提前，但不初始化
+
 app.whenReady().then(async () => {
   try {
+    const StoreModule = await import('electron-store');
+    const Store = StoreModule.default;
+    store = new Store(); // 在异步上下文中初始化 store
+
+    // 处理自定义协议
+    protocol.handle('app', (request) => {
+      const filePath = path.normalize(path.join(__dirname, 'frontend/react-app/build', request.url.slice('app://'.length)));
+      return net.fetch(filePath); // 使用 net.fetch 来读取本地文件
+    });
+
     console.log('[main] Initializing services...');
     await initializeServices();
     console.log('[main] Services initialized successfully');
@@ -206,7 +221,7 @@ app.whenReady().then(async () => {
     setMainWindow(mainWindow);
 
     console.log('[main] 注册 IPC 处理器...');
-    registerIpcHandlers();
+    registerIpcHandlers(store); // 传递 store 对象
     console.log('[main] IPC 处理器注册完成。');
 
     const novelDirPath = path.join(__dirname, 'novel');

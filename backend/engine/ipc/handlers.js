@@ -712,7 +712,7 @@ const handleDeleteDeepSeekChatHistory = async (event, sessionIdToDelete) => {
 };
 
 // 注册所有IPC处理器
-function register() {
+function register(store) { // 添加 store 参数
   console.log('[handlers.js] register: 开始注册 IPC 处理器...');
   ipcMain.handle('cancel-tool', handleCancelTool);
   ipcMain.handle('process-tool-action', handleProcessToolAction);
@@ -736,6 +736,15 @@ function register() {
   ipcMain.handle('get-deepseek-chat-history', handleGetDeepSeekChatHistory); // 新增：获取 DeepSeek 对话历史
   ipcMain.handle('delete-deepseek-chat-history', handleDeleteDeepSeekChatHistory); // 新增：删除 DeepSeek 对话历史
   ipcMain.handle('clear-deepseek-conversation', handleClearDeepSeekConversation); // 新增：清空 DeepSeek 对话历史
+  ipcMain.handle('set-store-value', async (event, key, value) => { // 新增：设置存储值
+    try {
+        store.set(key, value);
+        return { success: true, message: `值已保存: ${key}` };
+    } catch (error) {
+        console.error(`保存值失败: ${key}`, error);
+        return { success: false, error: error.message };
+    }
+  });
 }
 
 // 分开导出避免循环引用
