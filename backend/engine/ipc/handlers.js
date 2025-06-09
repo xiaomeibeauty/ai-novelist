@@ -233,7 +233,18 @@ const handleProcessCommand = async (event, command, allMessagesFromFrontend) => 
     // --- 对话历史管理的最终修复版本 ---
     // --- 修复加载历史会话后上下文丢失的问题 ---
     const latestMessage = allMessagesFromFrontend[allMessagesFromFrontend.length - 1];
-    const incomingSessionId = latestMessage.sessionId;
+    let incomingSessionId = latestMessage.sessionId;
+
+    // 如果最新消息的 sessionId 为 null，尝试从第一个用户消息获取，或者生成新的
+    if (!incomingSessionId) {
+        const firstUserMessage = allMessagesFromFrontend.find(msg => msg.role === 'user');
+        if (firstUserMessage && firstUserMessage.sessionId) {
+            incomingSessionId = firstUserMessage.sessionId;
+        } else {
+            incomingSessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            console.warn(`[handlers.js] 无法从前端消息中获取有效的 sessionId，生成新的 sessionId: ${incomingSessionId}`);
+        }
+    }
 
     // 判断是否需要从前端同步/水合后端的历史记录
     // 条件：1. 后端历史为空。 2. 后端历史的会话ID与新消息的会话ID不匹配。
@@ -247,7 +258,8 @@ const handleProcessCommand = async (event, command, allMessagesFromFrontend) => 
             tool_calls: msg.tool_calls,
             tool_call_id: msg.tool_call_id,
             name: msg.name,
-            sessionId: msg.sessionId
+            // 确保每个消息都带有正确的 sessionId
+            sessionId: msg.sessionId || incomingSessionId // 如果 msg.sessionId 为 null，则使用 incomingSessionId
         }));
         state.pendingToolCalls = []; // 重置待处理工具
         deepseek.resetResponseCount(); // 重置响应计数
@@ -257,7 +269,7 @@ const handleProcessCommand = async (event, command, allMessagesFromFrontend) => 
         state.conversationHistory.push({
             role: 'user',
             content: latestMessage.content,
-            sessionId: incomingSessionId
+            sessionId: incomingSessionId // 确保追加的消息带有正确的 sessionId
         });
     }
     

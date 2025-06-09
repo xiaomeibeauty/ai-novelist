@@ -135,7 +135,17 @@ async function chatWithDeepSeek(latestUserMessageContent) { // 修改参数名�
 
     const messagesToSend = [
         { role: "system", content: systemMessageContent, name: "system" },
-        ...state.conversationHistory
+        ...state.conversationHistory.map(msg => {
+            const deepseekMessage = {
+                role: msg.role,
+                content: msg.content,
+            };
+            // 仅包含 DeepSeek API 支持的字段
+            if (msg.name) deepseekMessage.name = msg.name;
+            if (msg.tool_calls) deepseekMessage.tool_calls = msg.tool_calls;
+            if (msg.tool_call_id) deepseekMessage.tool_call_id = msg.tool_call_id;
+            return deepseekMessage;
+        })
     ];
 
     // --- 日志记录：发送给 DeepSeek 的上下文 ---
@@ -285,6 +295,7 @@ async function chatWithDeepSeek(latestUserMessageContent) { // 修改参数名�
  
 // 将工具执行结果发送给 DeepSeek
 async function sendToolResultToDeepSeek(toolResultsArray) { // 移除 messagesBeforeToolCall 参数
+    let currentSessionId; // 将 currentSessionId 声明提前
     try {
         const openaiClient = await getOpenAIClient();
         if (!openaiClient) {
@@ -305,9 +316,17 @@ async function sendToolResultToDeepSeek(toolResultsArray) { // 移除 messagesBe
  
         // 步骤 3: 基于更新后的完整历史记录构建发送给 API 的消息数组
         // 注意：这里不再需要手动添加 system message，因为它应该只在对话开始时由 chatWithDeepSeek 添加
-        const messagesToSend = [
-            ...state.conversationHistory
-        ];
+        const messagesToSend = state.conversationHistory.map(msg => {
+           const deepseekMessage = {
+               role: msg.role,
+               content: msg.content,
+           };
+           // 仅包含 DeepSeek API 支持的字段
+           if (msg.name) deepseekMessage.name = msg.name;
+           if (msg.tool_calls) deepseekMessage.tool_calls = msg.tool_calls;
+           if (msg.tool_call_id) deepseekMessage.tool_call_id = msg.tool_call_id;
+           return deepseekMessage;
+       });
  
         console.log(`[DeepSeek.js] sendToolResultToDeepSeek - 准备发送给 DeepSeek 的消息:`, JSON.stringify(messagesToSend, null, 2));
  
@@ -323,9 +342,10 @@ async function sendToolResultToDeepSeek(toolResultsArray) { // 移除 messagesBe
         console.log('sendToolResultToDeepSeek: DeepSeek 原始响应 (aiResponse):', JSON.stringify(aiResponse, null, 2));
 
         // 获取当前会话的 sessionId（从 state.conversationHistory 的第一个消息中获取，或者从 toolResultsArray 中第一个工具的 sessionId 获取）
-        const currentSessionId = state.conversationHistory.length > 0
+        currentSessionId = state.conversationHistory.length > 0
             ? state.conversationHistory[0].sessionId
             : (toolResultsArray.length > 0 ? toolResultsArray[0].sessionId : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+        console.log(`[DeepSeek.js] DEBUG: currentSessionId after declaration: ${currentSessionId}`);
 
         // 将 DeepSeek 的原始响应（无论是否包含 tool_calls）添加到 conversationHistory
         state.conversationHistory.push({
@@ -441,7 +461,7 @@ async function sendToolResultToDeepSeek(toolResultsArray) { // 移除 messagesBe
         }
         throw error; // 抛出错误以便上层捕获
     }
-    // 在所有分支处理完毕后，统一记录日志
+    console.log(`[DeepSeek.js] DEBUG: Reached end of sendToolResultToDeepSeek. currentSessionId: ${currentSessionId}`);
     await logger.logDeepSeekConversation(currentSessionId);
     return { type: 'processed', payload: 'AI 响应已处理' };
 }
