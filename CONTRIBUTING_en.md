@@ -53,13 +53,9 @@ We welcome code contributions! Please follow these steps:
     ```
     Please ensure that `Your Name` and `your.email@example.com` match your Git configuration and actual information.
 
-    ### License Requirements and Automated Checks
-
-    To ensure the legal clarity and maintainability of the project, please note the following:
+    To ensure the legal clarity and maintainability of the project, please note:
 
     *   **License Compatibility**: All submitted code must be original or explicitly compatible with the [MIT License](LICENSE). **Strictly prohibit the introduction of any GPL, AGPL, or other Copyleft licensed code**, as these licenses may "infect" and force the entire project to be open source.
-    *   **DCO Enforcement**: We use automated tools to enforce that every commit includes a `Signed-off-by` line. If your commit fails the DCO check, please correct it according to the error message.
-    *   **License Scanning**: The project integrates license scanning tools to detect license compliance of third-party dependencies. Before introducing any new third-party libraries, please ensure their licenses are compatible with the MIT License.
 
 6.  **Push Branch**: Push your changes to your forked repository.
     ```bash
