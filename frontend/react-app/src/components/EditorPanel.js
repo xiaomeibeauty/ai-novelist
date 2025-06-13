@@ -8,6 +8,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faSave } from '@fortawesome/free-solid-svg-icons';
 
 import './EditorPanel.css';
+import NotificationModal from './NotificationModal'; // 新增
  
 import useIpcRenderer from '../hooks/useIpcRenderer';
  
@@ -21,6 +22,8 @@ function EditorPanel() {
   const initialContentRef = useRef('');
   const { invoke } = useIpcRenderer();
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showModal, setShowModal] = useState(false); // 新增
+  const [modalMessage, setModalMessage] = useState(''); // 新增
  
   // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
   // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
@@ -50,7 +53,8 @@ function EditorPanel() {
           console.error('文件保存失败:', result.error);
           // 仅在手动保存时弹窗失败提示
           if (isManualSave) {
-            alert(`文件保存失败: ${result.error}`);
+            setModalMessage(`文件保存失败: ${result.error}`);
+            setShowModal(true);
           }
           return { success: false, error: result.error };
         } else {
@@ -62,7 +66,8 @@ function EditorPanel() {
           }
           // 仅在手动保存时弹窗成功提示
           if (isManualSave) {
-            alert('文件保存成功！');
+            setModalMessage('文件保存成功！');
+            setShowModal(true);
           }
           return { success: true };
         }
@@ -70,7 +75,8 @@ function EditorPanel() {
         console.error('保存过程中发生异常:', error);
         // 仅在手动保存时弹窗异常提示
         if (isManualSave) {
-           alert(`保存过程中发生异常: ${error.message}`);
+           setModalMessage(`保存过程中发生异常: ${error.message}`);
+           setShowModal(true);
         }
         return { success: false, error: error.message };
       }
@@ -135,6 +141,41 @@ function EditorPanel() {
   const handleSaveButtonClick = useCallback(() => {
     saveContent(true); // 传入 true 表示手动保存
   }, [saveContent]);
+
+  const handleCreateNewFile = useCallback(async () => {
+    // 获取 novel 文件夹下的文件列表
+    const result = await invoke('list-novel-files');
+    const files = result.success ? result.files : []; // 确保 files 是一个数组
+    
+    console.log('现有文件列表 (files):', files); // 添加日志
+
+    let newFileName = '未命名1.txt';
+    let i = 1;
+    // 查找可用的未命名文件名
+    while (files.includes(newFileName)) { // 移除 'novel/' 前缀
+      console.log(`文件存在: ${newFileName}, 尝试下一个...`); // 添加日志
+      i++;
+      newFileName = `未命名${i}.txt`;
+    }
+    console.log('最终确定的新文件名:', newFileName); // 添加日志
+
+    const newFilePath = `novel/${newFileName}`;
+    try {
+      // 调用 Redux action 创建文件
+      await dispatch(createNovelFile({ filePath: newFilePath })).unwrap();
+      setModalMessage(`文件 "${newFileName}" 创建成功！`);
+      setShowModal(true);
+    } catch (error) {
+      console.error('创建新文件失败:', error);
+      setModalMessage(`创建新文件失败: ${error.message}`);
+      setShowModal(true);
+    }
+  }, [dispatch, invoke]);
+
+  const handleCloseTab = useCallback(() => {
+    setModalMessage('功能待开发');
+    setShowModal(true);
+  }, []);
   
   const [title, setTitle] = useState('未命名');
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -252,13 +293,13 @@ function EditorPanel() {
     switch (action) {
       case 'cut':
         if (!editor.state.selection.empty) {
-          navigator.clipboard.writeText(editor.getSelection().content().asText());
+          navigator.clipboard.writeText(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' '));
           editor.commands.deleteSelection();
         }
         break;
       case 'copy':
         if (!editor.state.selection.empty) {
-          navigator.clipboard.writeText(editor.getSelection().content().asText());
+          navigator.clipboard.writeText(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' '));
         }
         break;
       case 'paste':
@@ -302,83 +343,105 @@ function EditorPanel() {
 
 
   return (
-    <div className="editor-panel-content">
-      {console.log('[EditorPanel] Render: currentFile:', currentFile, 'hasUnsavedChanges:', hasUnsavedChanges)}
-      <div className="title-bar">
-        <input
-          type="text"
-          ref={titleInputRef}
-          className="novel-title-input"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onFocus={() => {
-            if (title === '未命名') {
-              setTitle('');
-            }
-          }}
-          onBlur={async () => {
-            await handleTitleSave();
-          }}
-          onKeyDown={async (e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              await handleTitleSave();
-              if (TiptapEditorInstance.current) {
-                TiptapEditorInstance.current.commands.focus('start');
-              }
-            }
-          }}
-        />
-        <button className="save-button" onClick={handleSaveButtonClick}>
-          <FontAwesomeIcon icon={faSave} />
-        </button>
-        {hasUnsavedChanges && <span className="unsaved-indicator">*</span>}
-      </div>
-      <div
-        ref={editorRef}
-        className="tiptap-editor"
-        onContextMenu={handleContextMenu}
-        onClick={handleEditorClick}
-      ></div>
-      {showContextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
-        >
-          <div
-            className={`context-menu-item ${isSelectionActive ? '' : 'disabled'}`}
-            onClick={() => handleMenuItemClick('cut')}
+    <>
+      {(!currentFile || currentFile === '未选择') ? (
+        <div className="no-file-selected-panel">
+          <button
+            className="action-button create-file-button"
+            onClick={handleCreateNewFile}
           >
-            剪切
+            创建新文件
+          </button>
+          <button
+            className="action-button close-tab-button"
+            onClick={handleCloseTab}
+          >
+            关闭标签页
+          </button>
+        </div>
+      ) : (
+        <div className="editor-panel-content">
+          {console.log('[EditorPanel] Render: currentFile:', currentFile, 'hasUnsavedChanges:', hasUnsavedChanges)}
+          <div className="title-bar">
+            <input
+              type="text"
+              ref={titleInputRef}
+              className="novel-title-input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onFocus={() => {
+                if (title === '未命名') {
+                  setTitle('');
+                }
+              }}
+              onBlur={async () => {
+                await handleTitleSave();
+              }}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  await handleTitleSave();
+                  if (TiptapEditorInstance.current) {
+                    TiptapEditorInstance.current.commands.focus('start');
+                  }
+                }
+              }}
+            />
+            <button className="save-button" onClick={handleSaveButtonClick}>
+              <FontAwesomeIcon icon={faSave} />
+            </button>
+            {hasUnsavedChanges && <span className="unsaved-indicator">*</span>}
           </div>
           <div
-            className="context-menu-item"
-            onClick={() => handleMenuItemClick('copy')}
-          >
-            复制
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => handleMenuItemClick('paste')}
-          >
-            粘贴
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => handleMenuItemClick('insert')}
-          >
-            插入
-          </div>
-          <div
-            className="context-menu-item"
-            onClick={() => handleMenuItemClick('selectAll')}
-          >
-            全选
-          </div>
+            ref={editorRef}
+            className="tiptap-editor"
+            onContextMenu={handleContextMenu}
+            onClick={handleEditorClick}
+          ></div>
+          {showContextMenu && (
+            <div
+              className="context-menu"
+              style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
+            >
+              <div
+                className={`context-menu-item ${isSelectionActive ? '' : 'disabled'}`}
+                onClick={() => handleMenuItemClick('cut')}
+              >
+                剪切
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleMenuItemClick('copy')}
+              >
+                复制
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleMenuItemClick('paste')}
+              >
+                粘贴
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleMenuItemClick('insert')}
+              >
+                插入
+              </div>
+              <div
+                className="context-menu-item"
+                onClick={() => handleMenuItemClick('selectAll')}
+              >
+                全选
+              </div>
+            </div>
+          )}
         </div>
       )}
-    </div>
+      {showModal && (
+        <NotificationModal message={modalMessage} onClose={() => setShowModal(false)} />
+      )}
+    </>
   );
 }
-
+ 
 export default EditorPanel;

@@ -346,3 +346,25 @@
 .nested-folder-content .item-icon {
     font-size: 0.9em; /* 图标也稍微小一点 */
 }
+
+/* 刷新按钮样式 */
+.refresh-button {
+    background-color: #3a3f4b;
+    color: #abb2bf;
+    border: 1px solid #5c6370;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    justify-content: center; /* 图标居中 */
+    gap: 5px;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.refresh-button:hover {
+    background-color: #4a4f5b;
+    border-color: var(--primary-color); /* 悬停时边框变为绿色 */
+    color: var(--primary-color); /* 悬停时文字变为绿色 */
+}

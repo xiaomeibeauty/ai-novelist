@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { useDispatch } from 'react-redux'; // 导入 useDispatch
 import { setIsHistoryPanelVisible } from '../store/slices/chatSlice'; // 导入对应的 action
 import './ChatHistoryPanel.css';
 
-const ChatHistoryPanel = ({ history, onSelectConversation, onDeleteConversation, isDeleteMode }) => {
+const ChatHistoryPanel = memo(({ history, onSelectConversation, onDeleteConversation, isDeleteMode }) => {
     const dispatch = useDispatch(); // 获取 dispatch 函数
 
     const handleClosePanel = () => {
@@ -26,9 +26,10 @@ const ChatHistoryPanel = ({ history, onSelectConversation, onDeleteConversation,
                         console.log(`conv[${index}].messages:`, conv.messages);
                         return (
                             <li key={conv.sessionId} className="history-item">
-                                <span onClick={() => onSelectConversation(conv)} className="history-text">
-                                    { /* 检查 conv.messages 是否存在且为数组，并有内容 */ }
-                                    {conv && conv.messages && Array.isArray(conv.messages) && conv.messages.length > 0 && conv.messages[0]?.content ? conv.messages[0].content.substring(0, 10) : '无内容'}...
+                                <span onClick={() => onSelectConversation(conv.sessionId)} className="history-text">
+                                    {/* 检查 conv.messages 是否存在且为数组，并有内容。优先使用 content，否则使用 text */}
+                                    {conv && conv.messages && Array.isArray(conv.messages) && conv.messages.length > 0 ?
+                                        (conv.messages[0].content || conv.messages[0].text || '[无内容]').substring(0, 20) : '无内容'}...
                                 </span>
                                 {isDeleteMode && (
                                     <button 
@@ -45,6 +46,6 @@ const ChatHistoryPanel = ({ history, onSelectConversation, onDeleteConversation,
             )}
         </div>
     );
-};
+});
 
 export default ChatHistoryPanel;

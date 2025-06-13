@@ -4,9 +4,11 @@ import useIpcRenderer from '../hooks/useIpcRenderer';
 import { setNovelContent, setCurrentFile, setChapters, triggerChapterRefresh } from '../store/slices/novelSlice'; // 导入 triggerChapterRefresh
 import './ChapterTreePanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faCaretRight, faCaretDown, faFolderPlus, faFileCirclePlus, faFolder, faFile } from '@fortawesome/free-solid-svg-icons'; // 导入新图标
+import { faGear, faCaretRight, faCaretDown, faFolderPlus, faFileCirclePlus, faFolder, faFile, faRotate } from '@fortawesome/free-solid-svg-icons'; // 导入新图标和刷新图标
 import CombinedIcon from './CombinedIcon';
 import ContextMenu from './ContextMenu'; // 引入 ContextMenu 组件
+import NotificationModal from './NotificationModal'; // 新增
+import ConfirmationModal from './ConfirmationModal'; // 新增
 
 function ChapterTreePanel() {
   const chapters = useSelector((state) => state.novel.chapters);
@@ -19,6 +21,12 @@ function ChapterTreePanel() {
   const [collapsedChapters, setCollapsedChapters] = useState({});
   const { invoke, on, removeListener } = useIpcRenderer();
   const dispatch = useDispatch();
+  const [showNotificationModal, setShowNotificationModal] = useState(false); // 新增
+  const [notificationMessage, setNotificationMessage] = useState(''); // 新增
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false); // 新增
+  const [confirmationMessage, setConfirmationMessage] = useState(''); // 新增
+  const [onConfirmCallback, setOnConfirmCallback] = useState(null); // 新增
+  const [onCancelCallback, setOnCancelCallback] = useState(null); // 新增
 
   // 新增状态用于控制右键菜单
   const [contextMenu, setContextMenu] = useState({
@@ -177,17 +185,21 @@ function ChapterTreePanel() {
 
   // 设置面板相关函数
   const handleToggleSettings = useCallback(() => {
-    setShowSettings(prev => !prev);
+    // setShowSettings(prev => !prev); // 移除旧的显示/隐藏逻辑
+    setNotificationMessage('功能待开发'); // 设置通知消息
+    setShowNotificationModal(true); // 显示通知模态框
   }, []);
 
   const handleSaveApiKey = useCallback(async () => {
     try {
       await invoke('set-store-value', 'deepseekApiKey', apiKey);
-      alert('API Key 已保存！');
+      setNotificationMessage('API Key 已保存！');
+      setShowNotificationModal(true);
       setShowSettings(false);
     } catch (error) {
       console.error('保存 API Key 失败:', error);
-      alert('保存 API Key 失败！');
+      setNotificationMessage('保存 API Key 失败！');
+      setShowNotificationModal(true);
     }
   }, [invoke, apiKey]);
 
@@ -236,31 +248,42 @@ function ChapterTreePanel() {
     try {
       const result = await invoke(action, ...args);
       if (result.success) {
-        alert(result.message);
+        setNotificationMessage(result.message);
+        setShowNotificationModal(true);
         fetchChapters(); // 刷新章节列表
+        invoke('trigger-focus-fix'); // 触发主进程的焦点修复
       } else {
-        alert(`操作失败: ${result.error}`);
+        setNotificationMessage(`操作失败: ${result.error}`);
+        setShowNotificationModal(true);
         console.error(`操作失败: ${action}`, result.error);
       }
       return result;
     } catch (error) {
-      alert(`调用 ${action} IPC 失败: ${error.message}`);
+      setNotificationMessage(`调用 ${action} IPC 失败: ${error.message}`);
+      setShowNotificationModal(true);
       console.error(`调用 ${action} IPC 失败:`, error);
       return { success: false, error: error.message };
     }
   }, [invoke, fetchChapters]);
 
   const handleDeleteItem = useCallback(async (itemId) => {
-    if (window.confirm(`确定要删除 "${itemId}" 吗？`)) {
+    setConfirmationMessage(`确定要删除 "${itemId}" 吗？`);
+    setOnConfirmCallback(() => async () => {
+      setShowConfirmationModal(false); // 关闭确认弹窗
       dispatch(setNovelContent('')); // 清空编辑器内容
       dispatch(setCurrentFile(null)); // 清空当前文件
       await handleIPCAction('delete-item', itemId);
-    }
+    });
+    setOnCancelCallback(() => () => {
+      setShowConfirmationModal(false); // 关闭确认弹窗
+    });
+    setShowConfirmationModal(true); // 显示确认弹窗
   }, [handleIPCAction, dispatch]);
 
   const handleRenameConfirm = useCallback(async (oldItemId, newTitle) => {
     if (!newTitle || !newTitle.trim()) {
-      alert('名称不能为空！');
+      setNotificationMessage('名称不能为空！');
+      setShowNotificationModal(true);
       return;
     }
 
@@ -281,7 +304,8 @@ function ChapterTreePanel() {
     const originalItem = findItemInChapters(chapters, oldItemId);
     if (!originalItem) {
         console.error('未找到要重命名的项:', oldItemId);
-        alert('重命名失败：原始项不存在。');
+        setNotificationMessage('重命名失败：原始项不存在。');
+        setShowNotificationModal(true);
         return;
     }
 
@@ -527,6 +551,10 @@ function ChapterTreePanel() {
         <button className="new-folder-button" onClick={() => handleNewFolder()}>
           <CombinedIcon baseIcon="folder" overlayIcon="plus" size="sm" />
         </button>
+        {/* 新增的刷新按钮 */}
+        <button className="refresh-button" onClick={fetchChapters} title="刷新章节列表">
+          <FontAwesomeIcon icon={faRotate} />
+        </button>
       </div>
 
       <div className="main-chapter-area"> {/* 新增的 div */}
@@ -549,13 +577,18 @@ function ChapterTreePanel() {
       )}
 
       {/* 设置按钮区域 */}
+      {/* 设置按钮区域 - 恢复显示 */}
       <div className="settings-button-area">
         <button className="settings-button" onClick={handleToggleSettings}>
           <FontAwesomeIcon icon={faGear} />
         </button>
       </div>
 
-      {/* 设置模态框 */}
+      {/* 旧的设置模态框 (已被新设置按钮取代，但结构保留，不再由 showSettings 控制) */}
+      {/* 确保这个模态框不会再被 handleToggleSettings 直接显示，因为它已被通知模态框替代 */}
+      {/* 这里的 showSettings 保持不变，但因为 handleToggleSettings 已经不控制它，所以它不会再出现 */}
+      {/* 如果 future 需要这个模态框的结构，可以重新启用并赋予新的控制逻辑 */}
+      {/*
       {showSettings && (
         <div className="settings-modal-overlay">
           <div className="settings-modal-content">
@@ -577,6 +610,7 @@ function ChapterTreePanel() {
           </div>
         </div>
       )}
+      */}
       {/* 重命名模态框 */}
       {showRenameModal && (
         <div className="settings-modal-overlay"> {/* 复用 settings-modal-overlay 样式 */}
@@ -602,6 +636,16 @@ function ChapterTreePanel() {
             </div>
           </div>
         </div>
+      )}
+      {showNotificationModal && (
+        <NotificationModal message={notificationMessage} onClose={() => setShowNotificationModal(false)} />
+      )}
+      {showConfirmationModal && (
+        <ConfirmationModal
+          message={confirmationMessage}
+          onConfirm={onConfirmCallback}
+          onCancel={onCancelCallback}
+        />
       )}
     </div>
   );

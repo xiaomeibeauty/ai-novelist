@@ -1,21 +1,25 @@
 const { ipcMain } = require('electron');
-const logger = require('../../../frontend/mvp/utils/logger');
-const deepseek = require('../api/deepseek');
+const logger = require('../../utils/logger');
+const { getAiChatHistoryFilePath } = require('../../utils/logger'); // 修改
+const chatService = require('../chatService'); // 引入 chatService
+const { getModelRegistry, initializeModelProvider } = require('../models/modelProvider'); // 修正路径
 let serviceRegistry = null;
 const path = require('path');
 
 // 新增：清空 DeepSeek 对话历史
-const handleClearDeepSeekConversation = async () => {
-    state.conversationHistory = []; // 清空对话历史
-    deepseek.resetResponseCount(); // 重置 DeepSeek 的响应计数器
-    console.log('[handlers.js] DeepSeek 对话历史已清空，响应计数器已重置。');
-    return { success: true, message: 'DeepSeek 对话历史已清空。' };
+const handleClearAiConversation = async () => { // 修改函数名
+    state.conversationHistory = [];
+    chatService.resetResponseCount();
+    console.log('[handlers.js] AI 对话历史已清空，响应计数器已重置。');
+    return { success: true, message: 'AI 对话历史已清空。' };
 };
 const fs = require('fs').promises;
 const toolExecutor = require('../../tool-service/tools/executor');
 const tools = require('../../tool-service/tools/definitions'); // 引入 tools 定义，用于 send-user-response
-const { state, setMainWindow } = require('../../state-manager'); // 从 state-manager.js 导入 state 和 setMainWindow
-const { getFileTree } = require('../../utils/file-tree-builder'); // 引入文件树构建工具
+const { state, setMainWindow } = require('../../state-manager');
+const { getFileTree } = require('../../utils/file-tree-builder');
+
+let storeInstance = null; // 新增：用于 electron-store 实例
 
 // 辅助函数：生成唯一的文件或文件夹名称
 const generateUniqueName = async (targetDir, originalFullName, isFolder) => {
@@ -57,49 +61,55 @@ const checkAndAutoSendBatchResults = async () => {
     );
 
     if (allProcessed && state.pendingToolCalls.length > 0) {
-        // 1. 将所有已处理的工具保存起来，以便发送给 DeepSeek
-        const completedTools = state.pendingToolCalls.filter(tool =>
-            tool.status === 'executed' || tool.status === 'failed' || tool.status === 'rejected'
-        );
+       // 1. 将所有已处理的工具保存起来，以便发送给 DeepSeek
+       const completedTools = state.pendingToolCalls.filter(tool =>
+           tool.status === 'executed' || tool.status === 'failed' || tool.status === 'rejected'
+       );
 
-        // 2. 清空 state.pendingToolCalls，并发送 batch_processing_complete 事件给前端
-        //    这确保了立即清空 UI
-        state.pendingToolCalls = [];
-        deepseek._sendAiResponseToFrontend('batch_processing_complete', null);
-        console.log('[main.js] 所有本轮工具都已处理完毕，pendingToolCalls 已清空，batch_processing_complete 已发送。');
+       // 2. 清空 state.pendingToolCalls，并发送 batch_processing_complete 事件给前端
+       //    这确保了立即清空 UI
+       state.pendingToolCalls = [];
+       chatService._sendAiResponseToFrontend('batch_processing_complete', null);
+       console.log('[main.js] 所有本轮工具都已处理完毕，pendingToolCalls 已清空，batch_processing_complete 已发送。');
 
-        try {
-            // 3. 将这些已处理工具的结果发送给 DeepSeek
-            const resultsToSend = completedTools.map(tool => ({
-                toolCallId: tool.toolCallId,
-                toolName: tool.toolName,
-                result: tool.result,
-                sessionId: tool.sessionId // 确保 sessionId 被传递
-            }));
-            
-            console.log('[main.js] 准备调用 sendToolResultToDeepSeek 发送批量结果。');
-            console.log('[main.js] 准备调用 sendToolResultToDeepSeek 发送批量结果。');
-            const deepseekResponseResult = await deepseek.sendToolResultToDeepSeek(resultsToSend);
-            
-            // deepseek.sendToolResultToDeepSeek 会将新的 pending_tools 添加到 state.pendingToolCalls
-            // 如果 DeepSeek 返回了新的 pending_tools，它们应该已经被添加到 state.pendingToolCalls
-            if (deepseekResponseResult.type === 'pending_tools' && state.pendingToolCalls.length > 0) {
-                console.log('[main.js] DeepSeek 返回了新的 pending_tools，强制发送 tool_suggestions 更新 UI。');
-                deepseek._sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
-            } else if (deepseekResponseResult.type !== 'pending_tools') {
-               console.log('[main.js] DeepSeek 没有返回新的 pending_tools。');
-            }
+       // 获取默认模型 ID
+       if (!storeInstance) {
+           const StoreModule = await import('electron-store');
+           const Store = StoreModule.default;
+           storeInstance = new Store();
+       }
+       const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+
+       try {
+           const resultsToSend = completedTools.map(tool => ({
+               toolCallId: tool.toolCallId,
+               toolName: tool.toolName,
+               result: tool.result,
+               sessionId: tool.sessionId // 确保 sessionId 被传递
+           }));
+           
+           console.log('[main.js] 准备调用 chatService.sendToolResultToAI 发送批量结果。');
+           const aiResponseResult = await chatService.sendToolResultToAI(resultsToSend, defaultModelId);
+           
+           // chatService.sendToolResultToAI 会将新的 pending_tools 添加到 state.pendingToolCalls
+           // 如果 AI 返回了新的 pending_tools，它们应该已经被添加到 state.pendingToolCalls
+           if (aiResponseResult.type === 'pending_tools' && state.pendingToolCalls.length > 0) {
+               console.log('[main.js] AI 返回了新的 pending_tools，强制发送 tool_suggestions 更新 UI。');
+               chatService._sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
+           } else if (aiResponseResult.type !== 'pending_tools') {
+              console.log('[main.js] AI 没有返回新的 pending_tools。');
+           }
 
 
         } catch (error) {
             console.error('[main.js] 自动批量工具结果反馈失败:', error);
-            deepseek._sendAiResponseToFrontend('error', `自动批量反馈失败: ${error.message}`);
+            chatService._sendAiResponseToFrontend('error', `自动批量反馈失败: ${error.message}`);
         }
     } else if (state.pendingToolCalls.length === 0) {
         // 如果 pendingToolCalls 为空，初始状态或所有工具都已通过上述逻辑处理并清空
         console.log('[main.js] pendingToolCalls 为空，无需处理。');
         // 确保 UI 也是空的，虽然上面已经发送了 batch_processing_complete
-        deepseek._sendAiResponseToFrontend('batch_processing_complete', null);
+        chatService._sendAiResponseToFrontend('batch_processing_complete', null);
     } else {
         // 仍有待处理的工具，等待用户操作或工具执行完成。
         console.log('[main.js] 仍有待处理的工具，等待用户操作或工具执行完成。当前状态:', state.pendingToolCalls.map(t => ({ id: t.toolCallId, status: t.status })));
@@ -119,11 +129,11 @@ const handleCancelTool = async (event, toolName, toolArgs, toolCallId) => {
 };
 
 // 处理单个工具动作
-const handleProcessToolAction = async (event, toolCallId, action) => {
-    console.log(`[handlers.js] 收到 'process-tool-action' 请求。toolCallId: ${toolCallId}, action: ${action}`);
+const handleProcessToolAction = async (event, { toolCallId, actionType }) => { // 更改签名以解构参数
+    console.log(`[handlers.js] 收到 'process-tool-action' 请求。toolCallId: ${toolCallId}, actionType: ${actionType}`);
     console.log(`[handlers.js] 当前 pendingToolCalls (${state.pendingToolCalls.length} 个):`, JSON.stringify(state.pendingToolCalls.map(t => ({ id: t.toolCallId, name: t.toolName, status: t.status })), null, 2));
     // 添加调试信息
-    logger.writeLog(`[debug] handlers.js: handleProcessToolAction 被调用。action: ${action}`);
+    logger.writeLog(`[debug] handlers.js: handleProcessToolAction 被调用。actionType: ${actionType}`);
     console.log(`[handlers.js] handleProcessToolAction: typeof logger.writeLog = ${typeof logger.writeLog}`);
     console.log(`[handlers.js] handleProcessToolAction: typeof require('fs') = ${typeof require('fs')}`);
     
@@ -133,8 +143,8 @@ const handleProcessToolAction = async (event, toolCallId, action) => {
         return { success: false, message: '未找到指定工具。' };
     }
 
-    if (action === 'approve') {
-        deepseek._sendAiResponseToFrontend('tool_action_status', { toolCallId, status: 'executing', message: `工具 ${toolToProcess.toolName} 正在执行...` });
+    if (actionType === 'approve') {
+        chatService._sendAiResponseToFrontend('tool_action_status', { toolCallId, status: 'executing', message: `工具 ${toolToProcess.toolName} 正在执行...` });
         if (!serviceRegistry) {
             serviceRegistry = require('../../service-registry').getServices();
         }
@@ -148,12 +158,12 @@ const handleProcessToolAction = async (event, toolCallId, action) => {
         );
         toolToProcess.status = executionResult.result.success ? 'executed' : 'failed';
         toolToProcess.result = executionResult.result;
-    } else if (action === 'reject') {
+    } else if (actionType === 'reject') {
         toolToProcess.status = 'rejected';
         toolToProcess.result = { success: false, error: `用户拒绝了 ${toolToProcess.toolName} 操作。` };
-        deepseek._sendAiResponseToFrontend('tool_action_status', { toolCallId, status: 'rejected', message: `工具 ${toolToProcess.toolName} 已被拒绝。` });
+        chatService._sendAiResponseToFrontend('tool_action_status', { toolCallId, status: 'rejected', message: `工具 ${toolToProcess.toolName} 已被拒绝。` });
     } else {
-        console.warn(`未知的工具动作: ${action}`);
+        console.warn(`未知的工具动作: ${actionType}`);
         return { success: false, message: '未知的工具动作。' };
     }
 
@@ -173,7 +183,7 @@ const handleProcessBatchAction = async (event, action) => {
     }
 
     if (action === 'approve_all') {
-        deepseek._sendAiResponseToFrontend('batch_action_status', { status: 'executing_all', message: `正在批量执行所有待处理工具...` });
+        chatService._sendAiResponseToFrontend('batch_action_status', { status: 'executing_all', message: `正在批量执行所有待处理工具...` }); // 修改
         for (const tool of toolsToProcess) {
             if (!serviceRegistry) {
                 serviceRegistry = require('../../service-registry').getServices();
@@ -194,7 +204,7 @@ const handleProcessBatchAction = async (event, action) => {
             tool.status = 'rejected';
             tool.result = { success: false, error: `用户批量拒绝了 ${tool.toolName} 操作。` };
         }
-        deepseek._sendAiResponseToFrontend('batch_action_status', { status: 'rejected_all', message: `所有待处理工具已被批量拒绝。` });
+        chatService._sendAiResponseToFrontend('batch_action_status', { status: 'rejected_all', message: `所有待处理工具已被批量拒绝。` }); // 修改
     } else {
         console.warn(`未知的批量工具动作: ${action}`);
         return { success: false, message: '未知的批量工具动作。' };
@@ -208,83 +218,93 @@ const handleProcessBatchAction = async (event, action) => {
 const handleSendBatchToolResults = async (event, processedTools) => {
     console.log('收到批量工具结果反馈请求:', processedTools);
     try {
-        const deepseekResponseResult = await deepseek.sendToolResultToDeepSeek(processedTools);
+        // 获取默认模型 ID
+        if (!storeInstance) {
+            const StoreModule = await import('electron-store');
+            const Store = StoreModule.default;
+            storeInstance = new Store();
+        }
+        const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+
+        const aiResponseResult = await chatService.sendToolResultToAI(processedTools, defaultModelId); // 修改并添加 modelId 参数
         state.pendingToolCalls = [];
-        deepseek._sendAiResponseToFrontend('batch_processing_complete', null);
+        chatService._sendAiResponseToFrontend('batch_processing_complete', null); // 修改
         return { success: true, message: '批量工具结果已成功反馈给 AI。' };
     } catch (error) {
         console.error('批量工具结果反馈失败:', error);
-        deepseek._sendAiResponseToFrontend('error', `批量反馈失败: ${error.message}`);
-        return { success: false, message: `批量工具结果反馈失败: ${error.message}` };
+        chatService._sendAiResponseToFrontend('error', `批量反馈失败: ${error.message}`); // 修改
+        return { success: false, error: error.message };
     }
 };
 
 // 处理用户命令
-const handleProcessCommand = async (event, command, allMessagesFromFrontend) => {
-    console.log(`[handlers.js] handleProcessCommand: 收到命令: ${command}`);
-    console.log(`[handlers.js] handleProcessCommand: 收到前端所有消息:`, allMessagesFromFrontend);
-
-    // 如果有未处理的工具建议，提醒用户先处理
+const handleProcessCommand = async (event, { message, sessionId, currentMessages }) => {
+    console.log(`[handlers.js] handleProcessCommand: 收到命令: ${message}`);
+    console.log(`[handlers.js] handleProcessCommand: 收到前端所有消息:`, currentMessages);
+ 
     if (state.pendingToolCalls.length > 0) {
-        deepseek._sendAiResponseToFrontend('warning', '您有未处理的工具建议。请先批准或拒绝它们，或等待它们自动处理完成，然后再发送新命令。');
+        chatService._sendAiResponseToFrontend('warning', '您有未处理的工具建议。请先批准或拒绝它们，或等待它们自动处理完成，然后再发送新命令。');
         return { type: 'warning', payload: '有未处理的工具建议。' };
     }
-
-    // --- 对话历史管理的最终修复版本 ---
-    // --- 修复加载历史会话后上下文丢失的问题 ---
-    const latestMessage = allMessagesFromFrontend[allMessagesFromFrontend.length - 1];
-    let incomingSessionId = latestMessage.sessionId;
-
-    // 如果最新消息的 sessionId 为 null，尝试从第一个用户消息获取，或者生成新的
+ 
+    // latestMessage 现在直接是用户发送的 message
+    const latestMessage = { role: 'user', content: message, sessionId: sessionId };
+    let incomingSessionId = sessionId;
+ 
     if (!incomingSessionId) {
-        const firstUserMessage = allMessagesFromFrontend.find(msg => msg.role === 'user');
-        if (firstUserMessage && firstUserMessage.sessionId) {
-            incomingSessionId = firstUserMessage.sessionId;
-        } else {
-            incomingSessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-            console.warn(`[handlers.js] 无法从前端消息中获取有效的 sessionId，生成新的 sessionId: ${incomingSessionId}`);
-        }
+        incomingSessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        console.warn(`[handlers.js] 前端未提供有效的 sessionId，生成新的 sessionId: ${incomingSessionId}`);
     }
-
-    // 判断是否需要从前端同步/水合后端的历史记录
-    // 条件：1. 后端历史为空。 2. 后端历史的会话ID与新消息的会话ID不匹配。
-    if (state.conversationHistory.length === 0 || state.conversationHistory[0].sessionId !== incomingSessionId) {
-        console.log(`[handlers.js] 检测到新会话或历史会话加载。从前端同步历史记录。Session ID: ${incomingSessionId}`);
-        // 使用前端发送的完整历史来替换后端的历史
-        // 注意：需要过滤掉前端特有的字段（如 sender, text, className）
-        state.conversationHistory = allMessagesFromFrontend.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-            tool_calls: msg.tool_calls,
-            tool_call_id: msg.tool_call_id,
-            name: msg.name,
-            // 确保每个消息都带有正确的 sessionId
-            sessionId: msg.sessionId || incomingSessionId // 如果 msg.sessionId 为 null，则使用 incomingSessionId
-        }));
-        state.pendingToolCalls = []; // 重置待处理工具
-        deepseek.resetResponseCount(); // 重置响应计数
-    } else {
-        // 如果是同一个会话，则只追加最新的用户消息
-        console.log(`[handlers.js] 延续当前会话 (ID: ${incomingSessionId})。追加新消息。`);
+ 
+    let loadedHistory = [];
+    try {
+        const fullHistoryFromLogger = await handleGetAiChatHistory();
+        const foundSession = fullHistoryFromLogger.find(session => session.sessionId === incomingSessionId);
+        if (foundSession) {
+            loadedHistory = foundSession.messages;
+            console.log(`[handlers.js] 从文件加载了会话历史。Session ID: ${incomingSessionId}, 消息数量: ${loadedHistory.length}`);
+        } else {
+            console.log(`[handlers.js] 未在文件系统中找到 Session ID: ${incomingSessionId} 的历史，将初始化新会话。`);
+        }
+    } catch (error) {
+        console.error(`[handlers.js] 加载历史会话失败: ${error.message}，将初始化新会话。`);
+    }
+ 
+    state.conversationHistory = loadedHistory;
+    state.pendingToolCalls = [];
+    chatService.resetResponseCount();
+ 
+    const lastMessageInState = state.conversationHistory[state.conversationHistory.length - 1];
+    if (!lastMessageInState || lastMessageInState.content !== latestMessage.content || lastMessageInState.role !== 'user') {
+        console.log(`[handlers.js] 追加最新的用户消息。Session ID: ${incomingSessionId}`);
         state.conversationHistory.push({
             role: 'user',
             content: latestMessage.content,
-            sessionId: incomingSessionId // 确保追加的消息带有正确的 sessionId
+            sessionId: incomingSessionId
         });
+    } else {
+        console.log(`[handlers.js] 延续当前会话 (ID: ${incomingSessionId})。最新用户消息已存在。`);
     }
     
-    // 2. 调用 deepseek.chatWithDeepSeek
-    console.log(`[handlers.js] handleProcessCommand: 调用 chatWithDeepSeek 前 conversationHistory 长度: ${state.conversationHistory.length}`);
-    console.log(`[handlers.js] handleProcessCommand: 实际发送给 DeepSeek 的历史 (最后两条):`, state.conversationHistory.slice(-2));
-
-    const aiResult = await deepseek.chatWithDeepSeek();
-
+    if (!storeInstance) {
+        const StoreModule = await import('electron-store');
+        const Store = StoreModule.default;
+        storeInstance = new Store();
+    }
+    const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+    const customSystemPrompt = storeInstance.get('customSystemPrompt'); // 获取自定义系统提示词
+    console.log(`[handlers.js] handleProcessCommand: 从 electron-store 读取到的 defaultAiModel: ${defaultModelId}`);
+    console.log(`[handlers.js] handleProcessCommand: 从 electron-store 读取到的 customSystemPrompt: ${customSystemPrompt ? customSystemPrompt.substring(0, 50) + '...' : '无'}`);
+ 
+    console.log(`[handlers.js] handleProcessCommand: 调用 chatService.chatWithAI 前 conversationHistory 长度: ${state.conversationHistory.length}`);
+    console.log(`[handlers.js] handleProcessCommand: 实际发送给 AI 的历史 (最后两条):`, state.conversationHistory.slice(-2));
+ 
+    const aiResult = await chatService.chatWithAI(latestMessage.content, defaultModelId, customSystemPrompt); // 传递 customSystemPrompt
+ 
     if (aiResult.type === 'pending_tools') {
-        console.log('chatWithDeepSeek 返回 pending_tools，主进程等待用户操作。');
-        // 移除 state.pendingDeepSeekResponse 的存储，deepseek.js 内部已处理
+        console.log('chatWithAI 返回 pending_tools，主进程等待用户操作。');
         return { success: true, message: '等待用户对工具建议进行操作。' };
     }
-    
 };
  
 // 处理用户回复 (针对 ask_user_question)
@@ -302,17 +322,26 @@ const handleSendUserResponse = async (event, userResponse, toolCallId) => {
         const toolResultsArray = [{
             toolCallId: toolCallId,
             toolName: "ask_user_question",
-            result: userResponse // 用户回复作为工具结果
+            result: userResponse
         }];
-        await deepseek.sendToolResultToDeepSeek(toolResultsArray);
+
+        // 获取默认模型 ID
+        if (!storeInstance) {
+            const StoreModule = await import('electron-store');
+            const Store = StoreModule.default;
+            storeInstance = new Store();
+        }
+        const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+
+        await chatService.sendToolResultToAI(toolResultsArray, defaultModelId); // 修改并添加 modelId 参数
 
     } catch (error) {
-        console.error("处理用户回复后再次调用 DeepSeek API 失败:", error);
-        deepseek._sendAiResponseToFrontend('error', `处理用户回复后 AI 反馈失败: ${error.message}`);
+        console.error("处理用户回复后再次调用 AI API 失败:", error);
+        chatService._sendAiResponseToFrontend('error', `处理用户回复后 AI 反馈失败: ${error.message}`); // 修改
     }
 };
 
-
+ 
 const getChaptersAndUpdateFrontend = async (mainWindow) => {
     const novelDirPath = path.join(__dirname, '../../../novel');
     try {
@@ -344,6 +373,39 @@ const getChaptersAndUpdateFrontend = async (mainWindow) => {
         if (mainWindow && mainWindow.webContents) {
             mainWindow.webContents.send('chapters-updated', { success: false, error: error.message });
         }
+        return { success: false, error: error.message };
+    }
+};
+
+// 辅助函数：将文件树扁平化为文件路径数组
+const flattenFileTree = (nodes) => {
+    let filePaths = [];
+    nodes.forEach(node => {
+        if (!node.isFolder) { // 如果不是文件夹，那就是文件
+            filePaths.push(node.id); // 使用 node.id 来获取文件路径
+        } else if (node.isFolder && node.children) { // 如果是文件夹且有子节点
+            filePaths = filePaths.concat(flattenFileTree(node.children));
+        }
+    });
+    return filePaths;
+};
+
+// 新增：处理列出 novel 目录下所有文件请求
+const handleListNovelFiles = async () => {
+    try {
+        const fileTreeResult = await getFileTree('novel'); // 获取 novel 目录的文件树
+        console.log('[handleListNovelFiles] fileTreeResult.tree:', JSON.stringify(fileTreeResult.tree, null, 2)); // 添加日志
+
+        if (fileTreeResult.success) {
+            const files = flattenFileTree(fileTreeResult.tree);
+            console.log('[handleListNovelFiles] 扁平化后的文件列表 (files):', files); // 添加日志
+            return { success: true, files };
+        } else {
+            console.error(`[handlers.js] 获取 novel 文件列表失败: ${fileTreeResult.error}`);
+            return { success: false, error: fileTreeResult.error };
+        }
+    } catch (error) {
+        console.error('[handlers.js] 列出 novel 文件时发生异常:', error);
         return { success: false, error: error.message };
     }
 };
@@ -417,47 +479,28 @@ const handleCreateFolder = async (event, folderPathInput) => {
 };
 
 // 处理创建新小说文件请求
-const handleCreateNovelFile = async (event, { title, content, parentPath = '' }) => { // 实际创建文件 IPC
+const handleCreateNovelFile = async (event, { filePath, content = '' }) => { // 实际创建文件 IPC
     const novelRootPath = path.join(__dirname, '../../../novel');
-    const targetDir = parentPath ? path.join(novelRootPath, parentPath) : novelRootPath;
+    // 移除 filePath 开头的 'novel/' 前缀，因为 novelRootPath 已经指向 novel 目录
+    const cleanFilePath = filePath.startsWith('novel/') ? filePath.substring(6) : filePath;
+    const fullPath = path.join(novelRootPath, cleanFilePath); // 使用清理后的路径
 
     // 确保目标目录存在
+    const targetDir = path.dirname(fullPath);
     await fs.mkdir(targetDir, { recursive: true }).catch(() => {}); // 忽略目录已存在的错误
 
-    // 使用 generateUniqueName 来获取最终的文件名
-    // 注意：这里的 title 已经是前端传递过来的，可能是“Untitled.txt”或“未命名.txt”
-    // generateUniqueName 内部会处理文件名和拓展名的分离
-    const finalUniqueFileName = await generateUniqueName(targetDir, title, false); // false 表示是文件
-    const newFilePath = path.join(targetDir, finalUniqueFileName);
-
     try {
-        await fs.writeFile(newFilePath, content, 'utf8');
-        // 创建成功后更新前端章节列表
-        // 移除主动更新前端章节列表的调用，改为依赖前端统一的更新机制
-        // console.log(`[handlers.js] handleCreateNovelFile: 调用 getChaptersAndUpdateFrontend 前 state.mainWindow 是否可用: ${!!state.mainWindow}`);
-        // await getChaptersAndUpdateFrontend(state.mainWindow);
-        // console.log(`[handlers.js] handleCreateNovelFile: 调用 getChaptersAndUpdateFrontend 后 state.mainWindow 是否可用: ${!!state.mainWindow}`);
+        await fs.writeFile(fullPath, content, 'utf8');
         // 构建返回给前端的相对路径，例如 novel/folder/file.txt
-        const relativeFilePath = path.relative(novelRootPath, newFilePath).replace(/\\/g, '/');
+        const relativeFilePath = path.relative(novelRootPath, fullPath).replace(/\\/g, '/');
 
-        // 加载新创建的文件内容并返回
-        const loadedContentResult = await handleLoadChapterContent(null, relativeFilePath); // 第一个参数 null 是因为没有 event 对象
-        if (loadedContentResult.success) {
-            return {
-                success: true,
-                newFilePath: relativeFilePath, // 返回完整相对路径，不加 'novel/' 前缀
-                content: loadedContentResult.content, // 返回新文件的内容
-                message: `文件 '${relativeFilePath}' 创建成功并已加载`
-            };
-        } else {
-            // 如果加载失败，仍然返回创建成功的信息，但没有内容
-            return {
-                success: true,
-                newFilePath: relativeFilePath,
-                content: '', // 无法加载内容，返回空字符串
-                message: `文件 '${relativeFilePath}' 创建成功，但加载失败: ${loadedContentResult.error}`
-            };
-        }
+        // 创建成功后，理论上新文件内容为空，直接返回成功状态和路径
+        return {
+            success: true,
+            newFilePath: `novel/${relativeFilePath}`, // 返回带 'novel/' 前缀的完整相对路径
+            content: content, // 返回新文件的内容 (通常为空字符串)
+            message: `文件 '${relativeFilePath}' 创建成功`
+        };
     } catch (error) {
         console.error(`[handlers.js] 创建小说文件失败: ${newFilePath}`, error);
         return { success: false, error: error.message };
@@ -544,7 +587,7 @@ const handleCopyItem = async (event, sourceId, targetFolderId) => {
     let isFolder = false;
     try {
         const stats = await fs.stat(sourcePath);
-        isFolder = stats.isDirectory();
+    isFolder = stats.isDirectory();
     } catch (error) {
         console.error(`[handlers.js] 复制项目时获取源项目信息失败: ${sourceId}`, error);
         return { success: false, error: `源项目不存在或无法访问: ${error.message}` };
@@ -650,49 +693,49 @@ const handleSaveNovelContent = async (event, filePath, content) => {
     }
 };
 
-// 新增：获取 DeepSeek 对话历史
-const handleGetDeepSeekChatHistory = async () => {
-    console.log('进入 handleGetDeepSeekChatHistory 函数'); // Debug Log A
+// 新增：获取 AI 对话历史
+const handleGetAiChatHistory = async () => { // 修改函数名
+    console.log('进入 handleGetAiChatHistory 函数');
     try {
         await logger.initialize(); // 确保日志目录存在
-        console.log('logger.initialize() 完成'); // Debug Log B
-        const historyPath = path.join(path.dirname(__dirname), '../../frontend/mvp/logs/deepseek/history.json');
-        console.log(`尝试读取文件路径: ${historyPath}`); // Debug Log C
-        console.log('准备读取文件内容'); // Debug Log D
+        console.log('logger.initialize() 完成');
+        const historyPath = getAiChatHistoryFilePath(); // 修改函数调用
+        console.log(`尝试读取文件路径: ${historyPath}`);
+        console.log('准备读取文件内容');
         const fileContent = await fs.readFile(historyPath, 'utf8');
-        console.log('文件内容读取成功'); // Debug Log E
+        console.log('文件内容读取成功');
         
-        if (fileContent.trim() === '') { // 检查文件内容是否为空或只包含空白字符
+        if (fileContent.trim() === '') {
             console.log('文件内容为空，返回空历史。');
             return [];
         }
 
-        console.log('准备解析 JSON'); // Debug Log F
+        console.log('准备解析 JSON');
         const history = JSON.parse(fileContent);
-        console.log('JSON 解析成功'); // Debug Log G
+        console.log('JSON 解析成功');
         if (!Array.isArray(history)) {
-            console.log('读取到的历史不是数组，返回空数组。'); // Debug Log H
-            return []; // 如果不是数组，返回空数组
-        }
-        console.log('成功获取 DeepSeek 对话历史。'); // Debug Log I
-        console.log('DeepSeek 对话历史内容:', history); // 新增日志
-        return history;
-    } catch (error) {
-        console.log(`捕获到错误: ${error.code || error.message}`); // Debug Log J
-        if (error.code === 'ENOENT') {
-            console.log('DeepSeek 历史文件不存在，返回空历史。');
+            console.log('读取到的历史不是数组，返回空数组。');
             return [];
         }
-        console.error('获取 DeepSeek 对话历史失败:', error);
+        console.log('成功获取 AI 对话历史。');
+        console.log('AI 对话历史内容:', history);
+        return history;
+    } catch (error) {
+        console.log(`捕获到错误: ${error.code || error.message}`);
+        if (error.code === 'ENOENT') {
+            console.log('AI 历史文件不存在，返回空历史。');
+            return [];
+        }
+        console.error('获取 AI 对话历史失败:', error);
         return [];
     }
 };
 
-// 新增：删除 DeepSeek 对话历史中的某条记录
-const handleDeleteDeepSeekChatHistory = async (event, sessionIdToDelete) => {
+// 新增：删除 AI 对话历史中的某条记录
+const handleDeleteAiChatHistory = async (event, sessionIdToDelete) => { // 修改函数名
     try {
         await logger.initialize(); // 确保日志目录存在
-        const historyPath = path.join(path.dirname(__dirname), '../../frontend/mvp/logs/deepseek/history.json');
+        const historyPath = getAiChatHistoryFilePath(); // 修改函数调用
         let history = [];
         try {
             const fileContent = await fs.readFile(historyPath, 'utf8');
@@ -702,10 +745,10 @@ const handleDeleteDeepSeekChatHistory = async (event, sessionIdToDelete) => {
             }
         } catch (error) {
             if (error.code === 'ENOENT') {
-                console.log('DeepSeek 历史文件不存在，无需删除。');
+                console.log('AI 历史文件不存在，无需删除。');
                 return { success: true, message: '历史记录已为空或文件不存在。' };
             }
-            throw error; // 其他错误继续抛出
+            throw error;
         }
 
         const initialLength = history.length;
@@ -718,7 +761,52 @@ const handleDeleteDeepSeekChatHistory = async (event, sessionIdToDelete) => {
             return { success: false, message: `未找到会话: ${sessionIdToDelete}` };
         }
     } catch (error) {
-        console.error('删除 DeepSeek 对话历史失败:', error);
+        console.error('删除 AI 对话历史失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// 新增：处理获取所有可用模型列表请求
+const handleListAllModels = async () => {
+    try {
+        // 确保 ModelProvider 已初始化，这在 chatService 中已经处理，这里再次确保
+        await initializeModelProvider();
+        const modelRegistry = getModelRegistry();
+        const allModels = await modelRegistry.listAllModels(); // **关键修改：添加 await**
+        
+        console.log(`[handlers.js] handleListAllModels: 获取到 ${allModels.length} 个模型。`);
+        
+        // 尝试对模型数据进行深拷贝和序列化检查
+        let serializableModels = [];
+        try {
+            serializableModels = allModels.map(model => {
+                const serializableModel = {};
+                for (const key in model) {
+                    // 只复制基本类型和纯对象/数组，避免不可序列化的值
+                    if (typeof model[key] !== 'function' && typeof model[key] !== 'symbol' && !(model[key] instanceof Date) && !(model[key] instanceof Promise) && !(model[key] instanceof ReadableStream)) {
+                        serializableModel[key] = JSON.parse(JSON.stringify(model[key]));
+                    } else {
+                        // 对于不可序列化的类型，将其置为空或跳过
+                        serializableModel[key] = null; 
+                    }
+                }
+                return serializableModel;
+            });
+            console.log(`[handlers.js] handleListAllModels: 成功序列化 ${serializableModels.length} 个模型。`);
+            console.log(`[handlers.js] handleListAllModels: 返回的模型数据 (序列化后):`, JSON.stringify(serializableModels, null, 2));
+            return { success: true, models: serializableModels };
+        } catch (serializeError) {
+            console.error('[handlers.js] 模型数据序列化失败:', serializeError);
+            console.error('[handlers.js] 原始模型数据示例 (可能包含不可序列化部分):', JSON.stringify(allModels.slice(0, 1), (key, value) => {
+                if (typeof value === 'function' || typeof value === 'symbol' || value instanceof Date || value instanceof Promise || value instanceof ReadableStream) {
+                    return `[不可序列化: ${typeof value}]`;
+                }
+                return value;
+            }, 2));
+            return { success: false, error: `模型数据序列化失败: ${serializeError.message}` };
+        }
+    } catch (error) {
+        console.error('[handlers.js] 获取所有模型列表失败:', error);
         return { success: false, error: error.message };
     }
 };
@@ -732,6 +820,7 @@ function register(store) { // 添加 store 参数
   ipcMain.handle('send-batch-tool-results', handleSendBatchToolResults);
   ipcMain.handle('process-command', handleProcessCommand);
   ipcMain.handle('send-user-response', handleSendUserResponse);
+  ipcMain.handle('list-novel-files', handleListNovelFiles); // 新增：注册列出 novel 目录下所有文件请求
   ipcMain.handle('get-chapters', handleGetChapters); // 注册新的IPC处理器
   ipcMain.handle('load-chapter-content', handleLoadChapterContent); // 注册新的IPC处理器
   ipcMain.handle('register-renderer-listeners', handleRegisterRendererListeners); // 注册新的IPC处理器
@@ -744,11 +833,25 @@ function register(store) { // 添加 store 参数
   ipcMain.handle('move-item', handleMoveItem); // 新增：移动文件/文件夹 (剪切)
   ipcMain.handle('update-novel-title', handleUpdateNovelTitle); // 注册新的IPC处理器
   console.log('[handlers.js] register: 注册 save-novel-content 处理器...');
-  ipcMain.handle('save-novel-content', handleSaveNovelContent); // 注册新的IPC处理器
-  ipcMain.handle('get-deepseek-chat-history', handleGetDeepSeekChatHistory); // 新增：获取 DeepSeek 对话历史
-  ipcMain.handle('delete-deepseek-chat-history', handleDeleteDeepSeekChatHistory); // 新增：删除 DeepSeek 对话历史
-  ipcMain.handle('clear-deepseek-conversation', handleClearDeepSeekConversation); // 新增：清空 DeepSeek 对话历史
-  ipcMain.handle('set-store-value', async (event, key, value) => { // 新增：设置存储值
+  ipcMain.handle('save-novel-content', handleSaveNovelContent);
+  ipcMain.handle('get-ai-chat-history', handleGetAiChatHistory); // 修改 IPC 处理器名称
+  ipcMain.handle('delete-ai-chat-history', handleDeleteAiChatHistory); // 修改 IPC 处理器名称
+  ipcMain.handle('clear-ai-conversation', handleClearAiConversation); // 修改 IPC 处理器名称
+  ipcMain.handle('list-all-models', handleListAllModels); // 新增：注册获取所有模型列表处理器
+  
+  // 新增：get-store-value 处理器
+  ipcMain.handle('get-store-value', async (event, key) => {
+    try {
+        const value = store.get(key);
+        return value;
+    } catch (error) {
+        console.error(`获取值失败: ${key}`, error);
+        return undefined; // 返回 undefined 而不是抛出错误，以便前端处理
+    }
+  });
+
+  // set-store-value 处理器
+  ipcMain.handle('set-store-value', async (event, key, value) => {
     try {
         store.set(key, value);
         return { success: true, message: `值已保存: ${key}` };
@@ -756,6 +859,11 @@ function register(store) { // 添加 store 参数
         console.error(`保存值失败: ${key}`, error);
         return { success: false, error: error.message };
     }
+  });
+
+  // 新增：用于接收前端日志并输出到主进程终端
+  ipcMain.on('main-log', (event, message) => {
+    console.log('[Frontend Log]:', message);
   });
 }
 

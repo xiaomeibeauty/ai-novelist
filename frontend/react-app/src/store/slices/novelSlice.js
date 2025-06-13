@@ -3,12 +3,12 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 // 异步 action 来创建小说文件
 export const createNovelFile = createAsyncThunk(
   'novel/createNovelFile',
-  async ({ title, content }, { rejectWithValue }) => {
+  async ({ filePath }, { rejectWithValue }) => { // 接收 filePath 参数
     try {
       // 假设 window.ipcRenderer 可用 (由 Electron 预加载脚本注入)
       if (window.ipcRenderer) {
-        // 调用主进程，传入文件标题和内容
-        const result = await window.ipcRenderer.invoke('create-novel-file', { title, content });
+        // 调用主进程，传入文件路径和空内容
+        const result = await window.ipcRenderer.invoke('create-novel-file', { filePath, content: '' });
         if (result.success) {
           return { newFilePath: result.newFilePath };
         } else {
@@ -18,7 +18,7 @@ export const createNovelFile = createAsyncThunk(
         // 非Electron环境下的模拟或错误处理
         console.warn('ipcRenderer is not available. Simulating file creation.');
         // 在非Electron环境下，可以模拟成功
-        return { newFilePath: `novel/${title}.md` };
+        return { newFilePath: filePath }; // 模拟成功，返回传入的 filePath
       }
     } catch (error) {
       console.error('Failed to create novel file:', error);
@@ -83,7 +83,7 @@ const novelSlice = createSlice({
       .addCase(createNovelFile.fulfilled, (state, action) => {
         state.status = 'succeeded';
         state.currentFile = action.payload.newFilePath;
-        state.novelContent = action.payload.content; // 新文件创建后加载其内容
+        state.novelContent = ''; // 新文件创建后，内容应为空
       })
       .addCase(createNovelFile.rejected, (state, action) => {
         state.status = 'failed';

@@ -1,21 +1,8 @@
 // 使用新的服务注册中心获取方式
 const serviceRegistry = require('../../service-registry');
-const logger = require('../../../frontend/mvp/utils/logger');
+const logger = require('../../utils/logger');
 const path = require('path');
-
-const toolExecutor = {
-    performToolExecution: async function(toolCallId, toolName, toolArgs, mainWindow, toolService) {
-        try {
-            const result = await toolService.executeTool(toolName, toolArgs);
-            return { result: { success: true, content: result } };
-        } catch (error) {
-            logger.error(`Tool execution failed: ${error}`);
-            return { result: { success: false, error: error.message } };
-        }
-    }
-};
-
-module.exports = toolExecutor;
+const fs = require('fs'); // 引入 fs 模块以便写入日志
 
 // 调用 MCP 服务
 async function callMcpTool(toolName, args) {
@@ -31,6 +18,8 @@ async function callMcpTool(toolName, args) {
             case 'read_file':
                 const content = await services.filesystem.readFile(args);
                 return { success: true, content: content };
+            case 'end_task': // 添加对 end_task 的处理
+                return { success: true, message: args.final_message || "任务已结束。" };
             default:
                 return { success: false, error: `未知工具: ${toolName}` };
         }
@@ -51,27 +40,23 @@ async function performToolExecution(toolCallId, toolName, toolArgs, mainWindow) 
         if (toolResult.success) {
             // 更新前端状态
             if (toolName === "write_file") {
-                // 根据用户反馈，只要是写入文件，就通知前端刷新章节列表并加载内容
-                // 不再区分是否为 novel 路径下的文件，所有 write_file 都视为章节更新
-                // AI 提供的 path 通常是文件名，例如 "我的第一章"
                 const chapterId = toolArgs.path; // 直接使用 path 作为 chapterId
                 logger.writeLog(`[executor.js] 接收到 write_file 操作，文件名为: ${chapterId}`);
-
-                // 移除主动通知前端章节列表更新的事件，改为依赖前端统一的更新机制
-                // mainWindow.webContents.send('chapters-updated'); // 移除此行
-                // logger.writeLog(`[executor.js] 发送 chapters-updated 事件`); // 移除此行
-                
-                mainWindow.webContents.send('update-novel-content', toolArgs.content); // 将写入的内容加载到编辑器
+                mainWindow.webContents.send('update-novel-content', toolArgs.content);
                 logger.writeLog(`[executor.js] 发送 update-novel-content 事件`);
-                
-                mainWindow.webContents.send('update-current-file', chapterId); // 设置当前文件为新章节
+                mainWindow.webContents.send('update-current-file', chapterId);
                 logger.writeLog(`[executor.js] 发送 update-current-file 事件`);
-                
                 finalMessage = `章节 '${chapterId}' 已创建/更新，并已加载到编辑框。`;
             } else if (toolName === "read_file") {
                 mainWindow.webContents.send('update-novel-content', toolResult.content);
                 mainWindow.webContents.send('update-current-file', toolArgs.path);
                 finalMessage = `文件 '${toolArgs.path}' 读取成功。内容已载入编辑框。`;
+            } else if (toolName === "end_task") {
+                // end_task 工具的执行结果不应被添加到 conversationHistory
+                // AI 已经通过 _sendAiResponseToFrontend('end_task', ...) 接收到最终消息
+                // 这里只需要返回一个成功的状态，不包含 content
+                finalMessage = toolResult.message || "任务已结束。";
+                return { result: { success: true, message: finalMessage } }; 
             }
         } else {
             finalMessage = `${toolName} 操作失败: ${toolResult.error}`;
@@ -99,46 +84,47 @@ async function performToolExecution(toolCallId, toolName, toolArgs, mainWindow) 
             result: toolResult
         };
         try {
+            // 使用 fs.promises.appendFile 确保异步写入
             await fs.promises.appendFile(debugLogPath, JSON.stringify(logEntry, null, 2) + '\n---\n', 'utf8');
         } catch (error) {
             logger.writeLog(`写入调试日志失败: ${error.message}`);
         }
         
-        return { success: true, message: finalMessage, result: toolResult };
-  
-     } catch (error) {
-         finalMessage = `执行工具 ${toolName} 时发生异常: ${error.message}`;
-         toolResult = { success: false, error: error.message };
-         
-         mainWindow.webContents.send('ai-response', {
-             type: 'tool_execution_status',
-             payload: {
-                 toolName: toolName,
-                 success: toolResult.success,
-                 message: `${toolName} 工具执行失败: ${toolResult.error}`
-             }
-         });
-         // 写入调试日志到文件
-         const debugLogPath = path.join(__dirname, '../debug_tool_action.log');
-         const logEntry = {
-             timestamp: new Date().toISOString(),
-             event: 'perform-tool-execution-error-return',
-             toolName: toolName,
-             toolCallId: toolCallId,
-             success: toolResult.success,
-             message: finalMessage,
-             result: toolResult,
-             errorMessage: error.message
-         };
-         try {
-             await fs.promises.appendFile(debugLogPath, JSON.stringify(logEntry, null, 2) + '\n---\n', 'utf8');
-         } catch (error) {
-             logger.writeLog(`写入调试日志失败: ${error.message}`);
-         }
-         
-         return { success: false, message: finalMessage, result: toolResult };
-     }
- }
+        // 返回工具执行结果
+        return { result: toolResult }; // 返回原始工具结果，包含 success 和 content
+    } catch (error) {
+        finalMessage = `执行工具 ${toolName} 时发生异常: ${error.message}`;
+        toolResult = { success: false, error: error.message };
+        
+        mainWindow.webContents.send('ai-response', {
+            type: 'tool_execution_status',
+            payload: {
+                toolName: toolName,
+                success: toolResult.success,
+                message: `${toolName} 工具执行失败: ${toolResult.error}`
+            }
+        });
+        // 写入调试日志到文件
+        const debugLogPath = path.join(__dirname, '../debug_tool_action.log');
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            event: 'perform-tool-execution-error-return',
+            toolName: toolName,
+            toolCallId: toolCallId,
+            success: toolResult.success,
+            message: finalMessage,
+            result: toolResult,
+            errorMessage: error.message
+        };
+        try {
+            await fs.promises.appendFile(debugLogPath, JSON.stringify(logEntry, null, 2) + '\n---\n', 'utf8');
+        } catch (error) {
+            logger.writeLog(`写入调试日志失败: ${error.message}`);
+        }
+        
+        return { success: false, message: finalMessage, result: toolResult };
+    }
+}
 
 module.exports = {
   callMcpTool,

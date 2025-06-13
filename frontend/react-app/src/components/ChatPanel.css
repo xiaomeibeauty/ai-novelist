@@ -83,6 +83,7 @@
 
 .chat-input-group {
     display: flex;
+    flex-direction: column; /* 使输入框和发送按钮垂直排列 */
     padding: 10px;
     border-top: 1px solid #444444; /* 边框颜色 */
     background-color: #333333; /* 背景颜色 */
@@ -90,12 +91,18 @@
 
 #chatInput {
     flex-grow: 1;
+    width: 100%; /* 使输入框占满整个宽度 */
     padding: 10px;
     border: 1px solid #666666; /* 边框颜色 */
     border-radius: 5px;
-    margin-right: 10px;
+    /* 移除 margin-right，因为现在输入框会占据整行 */
     background-color: #444444; /* 输入框背景 */
     color: #ffffff; /* 输入文字颜色 */
+    resize: vertical; /* 允许垂直拖动调整大小 */
+    min-height: 80px; /* 确保至少四行的高度 */
+    line-height: 20px; /* 设置行高 */
+    box-sizing: border-box; /* 确保内边距和边框包含在元素的总宽度和高度内 */
+    margin-bottom: 10px; /* 在输入框和发送按钮之间添加间距 */
 }
 
 #sendMessage {
@@ -342,32 +349,216 @@
     position: relative; /* For positioning absolute children like history panel */
 }
 
+/* 设置模态框样式 */
+.settings-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7); /* 半透明黑色背景 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000; /* 确保在其他内容之上 */
+}
+
+.settings-modal-content {
+    background-color: #333333; /* 模态框背景色，与聊天区背景一致 */
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    width: 90%;
+    max-width: 500px;
+    color: #ffffff; /* 模态框文字颜色 */
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.settings-modal-content h2 {
+    color: var(--primary-color); /* 标题使用绿色 */
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.setting-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.setting-item label {
+    font-weight: bold;
+    color: #ffffff; /* 标签文字颜色为白色 */
+}
+
+.setting-item input[type="text"],
+.setting-item select {
+    padding: 10px;
+    border: 1px solid #555555; /* 边框颜色 */
+    border-radius: 5px;
+    background-color: #444444; /* 输入框/选择框背景色 */
+    color: #ffffff; /* 输入框/选择框文字颜色 */
+    font-size: 1em;
+    width: 100%;
+    box-sizing: border-box; /* 确保内边距和边框包含在元素的总宽度内 */
+}
+
+/* 针对选择框下拉箭头的样式调整，如果需要的话 */
+.setting-item select {
+    -webkit-appearance: none; /* 移除默认的下拉箭头 */
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20fill%3D%22%23ffffff%22%20d%3D%22M5%206l5%205%205-5%202%202-7%207-7-7z%22%2F%3E%3C%2Fsvg%3E'); /* 自定义白色箭头 */
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 30px; /* 为箭头留出空间 */
+}
+
+.setting-item select option {
+    background-color: #444444; /* 下拉选项背景色 */
+    color: #ffffff; /* 下拉选项文字颜色 */
+}
+
+.setting-item input[type="text"]::placeholder {
+    color: #aaaaaa; /* 占位符颜色 */
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.modal-actions button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.2s ease;
+}
+
+.modal-actions .save-button {
+    background-color: var(--primary-color); /* 保存按钮使用绿色 */
+    color: white;
+}
+
+.modal-actions .save-button:hover {
+    background-color: var(--primary-color-dark); /* 悬停时深绿色 */
+}
+
+.modal-actions .cancel-button {
+    background-color: #555555; /* 取消按钮使用深灰色 */
+    color: white;
+}
+
+.modal-actions .cancel-button:hover {
+    background-color: #666666; /* 悬停时浅灰色 */
+}
+
 .chat-header-actions {
     display: flex;
-    justify-content: flex-end; /* 将按钮靠右对齐 */
+    justify-content: flex-start; /* 将按钮靠左对齐 */
     padding: 10px;
     background-color: #222222; /* 深色背景 */
     border-bottom: 1px solid #444444; /* 底部边框 */
 }
 
+.settings-button { /* 新增设置按钮样式 */
+    background-color: #3a3f4b;
+    color: #abb2bf;
+    border: 1px solid #5c6370;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-right: 10px; /* 与其他按钮之间留有间距 */
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.settings-button:hover {
+    background-color: #4a4f5b;
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
 .history-button,
 .clear-history-button {
-    background-color: var(--primary-color); /* 改为主题绿色 */
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 5px;
+    background-color: #3a3f4b; /* 与刷新按钮背景色一致 */
+    color: #abb2bf; /* 与刷新按钮文字颜色一致 */
+    border: 1px solid #5c6370; /* 与刷新按钮边框一致 */
+    padding: 5px 10px; /* 与刷新按钮内边距一致 */
+    border-radius: 4px; /* 与刷新按钮圆角一致 */
     cursor: pointer;
-    font-size: 16px;
+    font-size: 0.9em; /* 调整字体大小以适应图标 */
+    display: flex; /* 使图标居中 */
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
     margin-left: 10px; /* 按钮之间留有间距 */
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .history-button:hover,
 .clear-history-button:hover {
-    background-color: var(--primary-color-dark); /* 改为主题深绿色 */
+    background-color: #4a4f5b; /* 与刷新按钮悬停背景色一致 */
+    border-color: var(--primary-color); /* 悬停时边框变为绿色 */
+    color: var(--primary-color); /* 悬停时文字变为绿色 */
 }
 
-.history-button {
-    font-size: 20px; /* 时钟图标可能需要大一点 */
+/* DeepSeek Reasoning Content Styles */
+.reasoning-details {
+    background-color: #4a4a4a; /* 比主消息浅一点的背景色 */
+    border: 1px solid #666666;
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+.reasoning-summary {
+    font-weight: bold;
+    color: #ffffff;
+    cursor: pointer;
+    list-style: none; /* 移除默认的箭头 */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.reasoning-summary::-webkit-details-marker {
+    display: none; /* 移除Chrome/Safari的默认箭头 */
+}
+
+/* 自定义展开/折叠图标 */
+.reasoning-summary::after {
+    content: '▼'; /* 向下的三角形 */
+    font-size: 0.8em;
+    margin-left: 5px;
+    transition: transform 0.2s ease-in-out;
+}
+
+.reasoning-details[open] .reasoning-summary::after {
+    content: '▲'; /* 向上的三角形 */
+    transform: rotate(180deg); /* 旋转图标 */
+}
+
+.reasoning-content {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #3e3e3e; /* 比 details 稍深的背景色 */
+    border-radius: 5px;
+    white-space: pre-wrap; /* 保留空白符和换行 */
+    word-break: break-all; /* 长单词自动换行 */
+    font-size: 0.9em;
+    color: #cccccc;
+    overflow-x: auto; /* 允许水平滚动 */
 }
