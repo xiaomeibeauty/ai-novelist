@@ -20,6 +20,7 @@ const { state, setMainWindow } = require('../../state-manager');
 const { getFileTree } = require('../../utils/file-tree-builder');
 
 let storeInstance = null; // 新增：用于 electron-store 实例
+const checkpointService = require('../../../dist-backend/checkpoint-service'); // 引入编译后的 Checkpoint 服务
 
 // 辅助函数：生成唯一的文件或文件夹名称
 const generateUniqueName = async (targetDir, originalFullName, isFolder) => {
@@ -49,6 +50,17 @@ const generateUniqueName = async (targetDir, originalFullName, isFolder) => {
         }
     }
     return uniqueName;
+};
+
+const getCheckpointDirs = async () => {
+    if (!storeInstance) {
+        const StoreModule = await import('electron-store');
+        const Store = StoreModule.default;
+        storeInstance = new Store();
+    }
+    const novelDirPath = path.join(__dirname, '../../../novel');
+    const userDataPath = storeInstance.get('customStoragePath') || path.join(require('electron').app.getPath('userData'));
+    return { workspaceDir: novelDirPath, shadowDir: userDataPath };
 };
 
 // 检查并自动发送批量结果
@@ -89,15 +101,37 @@ const checkAndAutoSendBatchResults = async () => {
            }));
            
            console.log('[main.js] 准备调用 chatService.sendToolResultToAI 发送批量结果。');
-           const aiResponseResult = await chatService.sendToolResultToAI(resultsToSend, defaultModelId);
+           // **关键重构**: 调用新的流式生成器并处理其返回的块
+           // **关键重构**: chatService 现在从其内部状态获取流式设置
+           const stream = chatService.sendToolResultToAI(resultsToSend, defaultModelId);
+           let hasNewPendingTools = false;
            
-           // chatService.sendToolResultToAI 会将新的 pending_tools 添加到 state.pendingToolCalls
-           // 如果 AI 返回了新的 pending_tools，它们应该已经被添加到 state.pendingToolCalls
-           if (aiResponseResult.type === 'pending_tools' && state.pendingToolCalls.length > 0) {
-               console.log('[main.js] AI 返回了新的 pending_tools，强制发送 tool_suggestions 更新 UI。');
-               chatService._sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
-           } else if (aiResponseResult.type !== 'pending_tools') {
-              console.log('[main.js] AI 没有返回新的 pending_tools。');
+           // 获取当前会话ID，用于发送给前端
+           const currentSessionId = state.conversationHistory.length > 0 ? state.conversationHistory.find(m => m.sessionId)?.sessionId : null;
+
+           for await (const chunk of stream) {
+               if (chunk.type === 'text') {
+                   // AI 开始回复文本，先让前端创建一个新的 assistant 消息占位符
+                   chatService._sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: currentSessionId });
+               } else if (chunk.type === 'tool_calls' && chunk.content) {
+                   hasNewPendingTools = true;
+                   // 直接将工具调用块转发给前端
+                   for (const delta of chunk.content) {
+                       chatService._sendAiResponseToFrontend('tool_stream', [delta]);
+                       await new Promise(resolve => setTimeout(resolve, 10)); // 保持UI流畅
+                   }
+               } else if (chunk.type === 'error') {
+                   chatService._sendAiResponseToFrontend('error', chunk.payload);
+               }
+           }
+           // 流结束后，发送结束信号
+           chatService._sendAiResponseToFrontend('text_stream_end', null);
+
+           // 检查在流处理后，state.pendingToolCalls 是否真的被填充了
+           if (hasNewPendingTools) {
+                console.log('[main.js] AI 返回了新的 pending_tools，UI 应该已通过 tool_stream 更新。');
+           } else {
+               console.log('[main.js] AI 在工具反馈后没有返回新的 pending_tools。');
            }
 
 
@@ -129,90 +163,116 @@ const handleCancelTool = async (event, toolName, toolArgs, toolCallId) => {
 };
 
 // 处理单个工具动作
-const handleProcessToolAction = async (event, { toolCallId, actionType }) => { // 更改签名以解构参数
-    console.log(`[handlers.js] 收到 'process-tool-action' 请求。toolCallId: ${toolCallId}, actionType: ${actionType}`);
-    console.log(`[handlers.js] 当前 pendingToolCalls (${state.pendingToolCalls.length} 个):`, JSON.stringify(state.pendingToolCalls.map(t => ({ id: t.toolCallId, name: t.toolName, status: t.status })), null, 2));
-    // 添加调试信息
-    logger.writeLog(`[debug] handlers.js: handleProcessToolAction 被调用。actionType: ${actionType}`);
-    console.log(`[handlers.js] handleProcessToolAction: typeof logger.writeLog = ${typeof logger.writeLog}`);
-    console.log(`[handlers.js] handleProcessToolAction: typeof require('fs') = ${typeof require('fs')}`);
-    
-    let toolToProcess = state.pendingToolCalls.find(t => t.toolCallId === toolCallId);
-    if (!toolToProcess) {
-        console.warn(`未找到 toolCallId 为 ${toolCallId} 的待处理工具。`);
-        return { success: false, message: '未找到指定工具。' };
+// Unified tool action handler for both single and batch actions from the new UI
+const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
+    console.log(`[handlers.js] 收到 'process-tool-action' 请求。actionType: ${actionType}, toolCalls 数量: ${toolCalls ? toolCalls.length : 0}`);
+
+    if (!toolCalls || toolCalls.length === 0) {
+        // 在前端，状态已经改变，这里只是记录一个警告
+        console.warn('[handlers.js] process-tool-action 被调用，但没有提供 toolCalls。可能是用户取消后没有待处理的工具。');
+        return { success: true, message: '没有提供工具调用来处理。' };
     }
 
     if (actionType === 'approve') {
-        chatService._sendAiResponseToFrontend('tool_action_status', { toolCallId, status: 'executing', message: `工具 ${toolToProcess.toolName} 正在执行...` });
-        if (!serviceRegistry) {
-            serviceRegistry = require('../../service-registry').getServices();
+        chatService._sendAiResponseToFrontend('batch_action_status', { status: 'executing_all', message: `正在批量执行所有待处理工具...` });
+        for (const tool of toolCalls) {
+            let toolToProcess = state.pendingToolCalls.find(t => t.toolCallId === tool.toolCallId);
+            if (!toolToProcess) {
+                console.warn(`未找到 toolCallId 为 ${tool.toolCallId} 的待处理工具。可能已被处理。`);
+                continue; // Skip to the next tool
+            }
+
+            if (!serviceRegistry) {
+                serviceRegistry = require('../../service-registry').getServices();
+            }
+            
+            const executionResult = await toolExecutor.performToolExecution(
+                toolToProcess.toolCallId,
+                toolToProcess.function.name, // Use the name from the pending call
+                toolToProcess.toolArgs,
+                state.mainWindow,
+                serviceRegistry.toolService
+            );
+            toolToProcess.status = executionResult.result.success ? 'executed' : 'failed';
+            toolToProcess.result = executionResult.result;
+
+            if (toolToProcess.function.name === 'apply_diff') {
+                if (executionResult.result.success) {
+                    toolToProcess.result = { success: true };
+                } else {
+                    toolToProcess.result = { success: false, error: executionResult.result.error };
+                }
+            }
+
+            // 新增：如果工具执行成功且是文件修改类工具，则读取新内容并通知前端
+            if (executionResult.result.success) {
+                const toolName = toolToProcess.function.name;
+                const fileModificationTools = ['insert_content', 'write_to_file', 'apply_diff', 'create_file'];
+                
+                if (fileModificationTools.includes(toolName)) {
+                    const filePathArg = toolToProcess.toolArgs.path; // e.g., '我的第一章.txt' or 'subdir/file.txt'
+                    if (filePathArg) {
+                        // 构造正确的 novel 目录根路径
+                        const novelRootDir = path.join(__dirname, '../../../novel');
+                        // 构造文件的完整绝对路径
+                        const fullPath = path.join(novelRootDir, filePathArg);
+                        // 构造前端使用的、带 'novel/' 前缀的相对路径 ID
+                        const frontendPathId = `novel/${filePathArg.replace(/\\/g, '/')}`;
+
+                        try {
+                            const newContent = await fs.readFile(fullPath, 'utf8');
+                            
+                            // ================== 历史存档：工具调用后存档 ==================
+                            let checkpointId = null;
+                            try {
+                                const { workspaceDir, shadowDir } = await getCheckpointDirs();
+                                const taskId = toolToProcess.sessionId || 'default-task';
+                                const checkpoint = await checkpointService.saveCheckpoint(taskId, workspaceDir, shadowDir, `Saved after executing ${toolName}`);
+                                if (checkpoint && checkpoint.commit) {
+                                    checkpointId = checkpoint.commit;
+                                    console.log(`[handlers.js] Checkpoint saved after ${toolName}. ID: ${checkpointId}`);
+                                }
+                            } catch(err) {
+                                console.error(`[handlers.js] Failed to save checkpoint after ${toolName}:`, err);
+                            }
+                            // ========================================================
+
+                            // 使用 chatService 发送，因为它已经处理了 mainWindow 的引用
+                            chatService._sendAiResponseToFrontend('file-content-updated', {
+                                filePath: frontendPathId,
+                                newContent,
+                                checkpointId // <--- 附带 checkpointId
+                            });
+                            console.log(`[handlers.js] 文件 ${frontendPathId} 更新成功，已发送 file-content-updated (with checkpointId: ${checkpointId}) 通知到前端。`);
+                        } catch (readError) {
+                            console.error(`[handlers.js] 执行工具后读取文件 '${fullPath}' 失败:`, readError);
+                            // 即使读取失败，也发送一个错误信号，让前端知道操作已完成但同步失败
+                            chatService._sendAiResponseToFrontend('error', `文件 ${frontendPathId} 已被修改，但无法读取最新内容。`);
+                        }
+                    }
+                }
+            }
         }
-        
-        const executionResult = await toolExecutor.performToolExecution(
-            toolToProcess.toolCallId,
-            toolToProcess.toolName,
-            toolToProcess.toolArgs,
-            state.mainWindow,
-            serviceRegistry.toolService
-        );
-        toolToProcess.status = executionResult.result.success ? 'executed' : 'failed';
-        toolToProcess.result = executionResult.result;
     } else if (actionType === 'reject') {
-        toolToProcess.status = 'rejected';
-        toolToProcess.result = { success: false, error: `用户拒绝了 ${toolToProcess.toolName} 操作。` };
-        chatService._sendAiResponseToFrontend('tool_action_status', { toolCallId, status: 'rejected', message: `工具 ${toolToProcess.toolName} 已被拒绝。` });
+        for (const tool of toolCalls) {
+            let toolToProcess = state.pendingToolCalls.find(t => t.toolCallId === tool.toolCallId);
+            if (!toolToProcess) {
+                console.warn(`未找到 toolCallId 为 ${tool.toolCallId} 的待处理工具。可能已被处理。`);
+                continue; // Skip to the next tool
+            }
+            toolToProcess.status = 'rejected';
+            toolToProcess.result = { success: false, error: `用户拒绝了 ${toolToProcess.function.name} 操作。` };
+        }
+        chatService._sendAiResponseToFrontend('batch_action_status', { status: 'rejected_all', message: `所有待处理工具已被批量拒绝。` });
     } else {
         console.warn(`未知的工具动作: ${actionType}`);
         return { success: false, message: '未知的工具动作。' };
     }
 
     await checkAndAutoSendBatchResults();
-    return { success: true, message: `工具 ${toolToProcess.toolName} 动作已处理。` };
+    return { success: true, message: `批量工具动作 '${actionType}' 已处理。` };
 };
 
-// 处理批量工具动作
-const handleProcessBatchAction = async (event, action) => {
-    console.log(`[main.js] 收到 'process-batch-action' 请求。action: ${action}`);
-    console.log(`[main.js] 当前 pendingToolCalls (${state.pendingToolCalls.length} 个):`, JSON.stringify(state.pendingToolCalls.map(t => ({ id: t.toolCallId, name: t.toolName, status: t.status })), null, 2));
-    let toolsToProcess = state.pendingToolCalls.filter(tool => tool.status === 'pending');
-    
-    if (toolsToProcess.length === 0) {
-        console.log('没有待处理的工具进行批量操作。');
-        return { success: false, message: '没有待处理的工具。' };
-    }
-
-    if (action === 'approve_all') {
-        chatService._sendAiResponseToFrontend('batch_action_status', { status: 'executing_all', message: `正在批量执行所有待处理工具...` }); // 修改
-        for (const tool of toolsToProcess) {
-            if (!serviceRegistry) {
-                serviceRegistry = require('../../service-registry').getServices();
-            }
-            
-            const executionResult = await toolExecutor.performToolExecution(
-                tool.toolCallId,
-                tool.toolName,
-                tool.toolArgs,
-                state.mainWindow,
-                serviceRegistry.toolService
-            );
-            tool.status = executionResult.result.success ? 'executed' : 'failed';
-            tool.result = executionResult.result;
-        }
-    } else if (action === 'reject_all') {
-        for (const tool of toolsToProcess) {
-            tool.status = 'rejected';
-            tool.result = { success: false, error: `用户批量拒绝了 ${tool.toolName} 操作。` };
-        }
-        chatService._sendAiResponseToFrontend('batch_action_status', { status: 'rejected_all', message: `所有待处理工具已被批量拒绝。` }); // 修改
-    } else {
-        console.warn(`未知的批量工具动作: ${action}`);
-        return { success: false, message: '未知的批量工具动作。' };
-    }
-
-    await checkAndAutoSendBatchResults();
-    return { success: true, message: `批量工具动作 '${action}' 已处理。` };
-};
 
 // 处理批量工具结果反馈请求
 const handleSendBatchToolResults = async (event, processedTools) => {
@@ -239,71 +299,103 @@ const handleSendBatchToolResults = async (event, processedTools) => {
 
 // 处理用户命令
 const handleProcessCommand = async (event, { message, sessionId, currentMessages }) => {
-    console.log(`[handlers.js] handleProcessCommand: 收到命令: ${message}`);
-    console.log(`[handlers.js] handleProcessCommand: 收到前端所有消息:`, currentMessages);
- 
-    if (state.pendingToolCalls.length > 0) {
-        chatService._sendAiResponseToFrontend('warning', '您有未处理的工具建议。请先批准或拒绝它们，或等待它们自动处理完成，然后再发送新命令。');
-        return { type: 'warning', payload: '有未处理的工具建议。' };
-    }
- 
-    // latestMessage 现在直接是用户发送的 message
-    const latestMessage = { role: 'user', content: message, sessionId: sessionId };
-    let incomingSessionId = sessionId;
- 
-    if (!incomingSessionId) {
-        incomingSessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        console.warn(`[handlers.js] 前端未提供有效的 sessionId，生成新的 sessionId: ${incomingSessionId}`);
-    }
- 
-    let loadedHistory = [];
+    // state.isStreaming is now controlled by the 'set-streaming-mode' event.
+    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}", Current service streaming state: ${chatService.getStreamingMode()}`);
+
+    // ================== 历史存档：首次存档 ==================
     try {
-        const fullHistoryFromLogger = await handleGetAiChatHistory();
-        const foundSession = fullHistoryFromLogger.find(session => session.sessionId === incomingSessionId);
-        if (foundSession) {
-            loadedHistory = foundSession.messages;
-            console.log(`[handlers.js] 从文件加载了会话历史。Session ID: ${incomingSessionId}, 消息数量: ${loadedHistory.length}`);
-        } else {
-            console.log(`[handlers.js] 未在文件系统中找到 Session ID: ${incomingSessionId} 的历史，将初始化新会话。`);
+        const { workspaceDir, shadowDir } = await getCheckpointDirs();
+        // 假设 taskId 是从 sessionId 派生的，或者是一个全局/会话级变量
+        const taskId = sessionId || 'default-task';
+        const history = await checkpointService.getHistory(taskId, workspaceDir, shadowDir);
+        if (!history || history.length === 0) {
+            const savedCheckpoint = await checkpointService.saveCheckpoint(taskId, workspaceDir, shadowDir, 'Initial state');
+            console.log(`[handlers.js] Initial checkpoint saved for task: ${taskId}`);
+            if (savedCheckpoint && savedCheckpoint.commit) {
+                // 首次存档也发送一个带checkpointId的消息给前端
+                chatService._sendAiResponseToFrontend('system-message', {
+                    text: `任务已初始化，初始存档已创建。`,
+                    checkpointId: savedCheckpoint.commit,
+                    id: `checkpoint-${savedCheckpoint.commit}-${Date.now()}`
+                });
+            }
         }
     } catch (error) {
-        console.error(`[handlers.js] 加载历史会话失败: ${error.message}，将初始化新会话。`);
+        console.error('[handlers.js] Error during initial checkpoint save:', error);
     }
- 
-    state.conversationHistory = loadedHistory;
+    // ========================================================
+    
+    // **关键修复**: 不再从磁盘加载历史记录。完全信任并使用从前端传递的 `currentMessages`。
+    // 这确保了后端的状态与前端 UI 完全同步。
+    state.conversationHistory = currentMessages;
+    
+    // 追加最新的用户消息
+    const latestMessage = { role: 'user', content: message, sessionId: sessionId };
+    state.conversationHistory.push(latestMessage);
+    
+    // 重置相关状态
     state.pendingToolCalls = [];
     chatService.resetResponseCount();
- 
-    const lastMessageInState = state.conversationHistory[state.conversationHistory.length - 1];
-    if (!lastMessageInState || lastMessageInState.content !== latestMessage.content || lastMessageInState.role !== 'user') {
-        console.log(`[handlers.js] 追加最新的用户消息。Session ID: ${incomingSessionId}`);
-        state.conversationHistory.push({
-            role: 'user',
-            content: latestMessage.content,
-            sessionId: incomingSessionId
-        });
-    } else {
-        console.log(`[handlers.js] 延续当前会话 (ID: ${incomingSessionId})。最新用户消息已存在。`);
-    }
     
+    // 获取模型和系统提示词
     if (!storeInstance) {
         const StoreModule = await import('electron-store');
         const Store = StoreModule.default;
         storeInstance = new Store();
     }
     const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
-    const customSystemPrompt = storeInstance.get('customSystemPrompt'); // 获取自定义系统提示词
-    console.log(`[handlers.js] handleProcessCommand: 从 electron-store 读取到的 defaultAiModel: ${defaultModelId}`);
-    console.log(`[handlers.js] handleProcessCommand: 从 electron-store 读取到的 customSystemPrompt: ${customSystemPrompt ? customSystemPrompt.substring(0, 50) + '...' : '无'}`);
+    const customSystemPrompt = storeInstance.get('customSystemPrompt');
  
-    console.log(`[handlers.js] handleProcessCommand: 调用 chatService.chatWithAI 前 conversationHistory 长度: ${state.conversationHistory.length}`);
-    console.log(`[handlers.js] handleProcessCommand: 实际发送给 AI 的历史 (最后两条):`, state.conversationHistory.slice(-2));
+    // **关键修复**: 构建要发送给 AI 的消息数组，确保包含系统提示词和同步后的历史
+    // **关键修复**: 在将历史记录发送到 chatService 之前，进行严格过滤，
+    // 移除任何没有 'role' 或 'content'/'tool_calls' 的无效消息。
+    // 这可以防止被污染的前端状态破坏后端调用。
+    // 同时，移除不安全的 .map() 重构，直接使用过滤后的历史记录。
+    const validHistory = state.conversationHistory.filter(msg =>
+        msg && msg.role && (msg.content || msg.tool_calls)
+    );
+
+    const messagesToSend = [
+        // System prompt is now handled inside chatService. We pass the full valid history.
+        ...validHistory
+    ];
  
-    const aiResult = await chatService.chatWithAI(latestMessage.content, defaultModelId, customSystemPrompt); // 传递 customSystemPrompt
- 
-    if (aiResult.type === 'pending_tools') {
-        console.log('chatWithAI 返回 pending_tools，主进程等待用户操作。');
-        return { success: true, message: '等待用户对工具建议进行操作。' };
+    try {
+        // **关键重构**: 统一流式和非流式处理逻辑
+        // 因为 chatService 现在总是返回一个生成器，我们可以用同一个循环来处理
+        // **关键重构**: chatService 现在从其内部状态获取流式设置
+        const stream = chatService.chatWithAI(messagesToSend, defaultModelId, customSystemPrompt);
+        for await (const chunk of stream) {
+            if (chunk.type === 'text') {
+                if (chatService.getStreamingMode()) {
+                    chatService._sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: sessionId });
+                } else {
+                    // 非流式模式，发送一个完整的 text 事件
+                    chatService._sendAiResponseToFrontend('text', { content: chunk.content, sessionId: sessionId });
+                }
+            } else if (chunk.type === 'tool_calls' && chunk.content) {
+                 if (chatService.getStreamingMode()) {
+                    // 流式模式：拆分工具调用块并逐个发送
+                    for (const delta of chunk.content) {
+                        chatService._sendAiResponseToFrontend('tool_stream', [delta]);
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                } else {
+                    // 非流式模式：直接发送完整的 tool_suggestions
+                    // 注意: state.pendingToolCalls 此时应已在 chatService 中被填充完毕
+                    chatService._sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
+                }
+            } else if (chunk.type === 'end_task_processed' || chunk.type === 'ask_user_question_processed' || chunk.type === 'pending_tools' || chunk.type === 'processed' || chunk.type === 'error') {
+                // 这些是生成器结束时的状态，可以忽略，因为相关 IPC 消息已经在 chatService 内部发送
+            }
+        }
+        // 仅在流式模式下才需要发送流结束信号
+        if (chatService.getStreamingMode()) {
+            chatService._sendAiResponseToFrontend('text_stream_end', null);
+        }
+    } catch (error) {
+        console.error('调用聊天服务失败:', error);
+        chatService._sendAiResponseToFrontend('error', `调用聊天服务失败: ${error.message}`);
     }
 };
  
@@ -777,33 +869,16 @@ const handleListAllModels = async () => {
         console.log(`[handlers.js] handleListAllModels: 获取到 ${allModels.length} 个模型。`);
         
         // 尝试对模型数据进行深拷贝和序列化检查
-        let serializableModels = [];
         try {
-            serializableModels = allModels.map(model => {
-                const serializableModel = {};
-                for (const key in model) {
-                    // 只复制基本类型和纯对象/数组，避免不可序列化的值
-                    if (typeof model[key] !== 'function' && typeof model[key] !== 'symbol' && !(model[key] instanceof Date) && !(model[key] instanceof Promise) && !(model[key] instanceof ReadableStream)) {
-                        serializableModel[key] = JSON.parse(JSON.stringify(model[key]));
-                    } else {
-                        // 对于不可序列化的类型，将其置为空或跳过
-                        serializableModel[key] = null; 
-                    }
-                }
-                return serializableModel;
-            });
-            console.log(`[handlers.js] handleListAllModels: 成功序列化 ${serializableModels.length} 个模型。`);
-            console.log(`[handlers.js] handleListAllModels: 返回的模型数据 (序列化后):`, JSON.stringify(serializableModels, null, 2));
+            // 使用 JSON.stringify 和 JSON.parse 来进行深拷贝和清理
+            // 这会自动移除所有值为 `undefined` 的键，并处理大多数可序列化的数据类型
+            const serializableModels = JSON.parse(JSON.stringify(allModels));
             return { success: true, models: serializableModels };
-        } catch (serializeError) {
-            console.error('[handlers.js] 模型数据序列化失败:', serializeError);
-            console.error('[handlers.js] 原始模型数据示例 (可能包含不可序列化部分):', JSON.stringify(allModels.slice(0, 1), (key, value) => {
-                if (typeof value === 'function' || typeof value === 'symbol' || value instanceof Date || value instanceof Promise || value instanceof ReadableStream) {
-                    return `[不可序列化: ${typeof value}]`;
-                }
-                return value;
-            }, 2));
-            return { success: false, error: `模型数据序列化失败: ${serializeError.message}` };
+        } catch (error) {
+            console.error('[handlers.js] 模型数据序列化失败:', error);
+            // 记录失败时的原始数据以供调试
+            console.error('[handlers.js] 导致失败的原始模型数据:', allModels);
+            return { success: false, error: `模型数据序列化失败: ${error.message}` };
         }
     } catch (error) {
         console.error('[handlers.js] 获取所有模型列表失败:', error);
@@ -814,9 +889,14 @@ const handleListAllModels = async () => {
 // 注册所有IPC处理器
 function register(store) { // 添加 store 参数
   console.log('[handlers.js] register: 开始注册 IPC 处理器...');
+  // 新增: 处理前端发送的流式设置
+  ipcMain.on('set-streaming-mode', (event, payload) => {
+    chatService.setStreamingMode(payload);
+  });
+
   ipcMain.handle('cancel-tool', handleCancelTool);
   ipcMain.handle('process-tool-action', handleProcessToolAction);
-  ipcMain.handle('process-batch-action', handleProcessBatchAction);
+  // ipcMain.handle('process-batch-action', handleProcessBatchAction); // This is now obsolete
   ipcMain.handle('send-batch-tool-results', handleSendBatchToolResults);
   ipcMain.handle('process-command', handleProcessCommand);
   ipcMain.handle('send-user-response', handleSendUserResponse);
@@ -839,6 +919,30 @@ function register(store) { // 添加 store 参数
   ipcMain.handle('clear-ai-conversation', handleClearAiConversation); // 修改 IPC 处理器名称
   ipcMain.handle('list-all-models', handleListAllModels); // 新增：注册获取所有模型列表处理器
   
+  // Checkpoint Service Handlers
+  ipcMain.handle('checkpoints:save', async (event, { taskId, message }) => {
+    const { workspaceDir, shadowDir } = await getCheckpointDirs();
+    return await checkpointService.saveCheckpoint(taskId, workspaceDir, shadowDir, message);
+  });
+
+  ipcMain.handle('checkpoints:restore', async (event, { taskId, commitHash }) => {
+    const { workspaceDir, shadowDir } = await getCheckpointDirs();
+    return await checkpointService.restoreCheckpoint(taskId, workspaceDir, shadowDir, commitHash);
+  });
+
+  ipcMain.handle('checkpoints:getDiff', async (event, { taskId, from, to }) => {
+    const { workspaceDir, shadowDir } = await getCheckpointDirs();
+    return await checkpointService.getDiff(taskId, workspaceDir, shadowDir, from, to);
+  });
+
+  ipcMain.handle('checkpoints:getHistory', async (event, { taskId }) => {
+    const { workspaceDir, shadowDir } = await getCheckpointDirs();
+    return await checkpointService.getHistory(taskId, workspaceDir, shadowDir);
+  });
+
+
+
+
   // 新增：get-store-value 处理器
   ipcMain.handle('get-store-value', async (event, key) => {
     try {
@@ -874,5 +978,5 @@ exports.state = state;
 exports.processCommand = handleProcessCommand;
 exports.sendUserResponse = handleSendUserResponse;
 exports.processToolAction = handleProcessToolAction;
-exports.processBatchAction = handleProcessBatchAction;
+// exports.processBatchAction = handleProcessBatchAction; // This is now obsolete
 exports.getChaptersAndUpdateFrontend = getChaptersAndUpdateFrontend; // 导出新函数

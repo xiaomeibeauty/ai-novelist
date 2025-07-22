@@ -562,3 +562,173 @@
     color: #cccccc;
     overflow-x: auto; /* 允许水平滚动 */
 }
+/* Switch toggle styles */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 12px;
+  width: 12px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  -webkit-transition: .4s;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #2196F3;
+}
+
+input:checked + .slider:before {
+  -webkit-transform: translateX(20px);
+  -ms-transform: translateX(20px);
+  transform: translateX(20px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 20px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+/* Tool Action Bar Styles */
+.tool-action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #f0f0f0;
+  border-top: 1px solid #ccc;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 5px; /* Add some space before the input box */
+}
+
+.tool-action-bar span {
+  font-weight: bold;
+  color: #333;
+}
+
+.tool-action-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.tool-action-buttons .approve-all-button,
+.tool-action-buttons .reject-all-button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.tool-action-buttons .approve-all-button {
+  background-color: #28a745;
+  color: white;
+}
+
+.tool-action-buttons .approve-all-button:hover {
+  background-color: #218838;
+}
+
+.tool-action-buttons .reject-all-button {
+  background-color: #dc3545;
+  color: white;
+}
+
+.tool-action-buttons .reject-all-button:hover {
+  background-color: #c82333;
+}
+
+.tool-action-buttons button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+/* 新增：为工具调用消息设置特定样式 */
+.message-content.is-tool-call {
+    color: #28a745; /* A nice green color for tool calls */
+    white-space: pre-wrap; /* Ensures formatted JSON is displayed correctly */
+    background-color: #333; /* Match AI message background */
+    font-family: 'Courier New', Courier, monospace; /* Use a monospace font for code-like text */
+}
+.message {
+  position: relative;
+}
+
+.checkpoint-icon {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  cursor: pointer;
+  color: #888;
+  font-size: 0.9em;
+}
+
+.checkpoint-icon:hover {
+  color: #333;
+}
+.checkpoint-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: #f0f4f8;
+  border-radius: 8px;
+  margin: 5px 0;
+}
+
+.checkpoint-restore-button {
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s;
+}
+
+.checkpoint-restore-button:hover {
+  background-color: #357abd;
+}
+
+.checkpoint-id-display {
+  font-family: monospace;
+  font-size: 0.8em;
+  color: #777;
+}

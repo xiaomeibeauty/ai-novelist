@@ -16,10 +16,22 @@ async function callMcpTool(toolName, args) {
                 result = await services.filesystem.writeFile(args);
                 return { success: true, content: "操作成功。" };
             case 'read_file':
-                const content = await services.filesystem.readFile(args);
-                return { success: true, content: content };
+                result = await services.filesystem.readFile(args);
+                return { success: result.success, content: result.content };
             case 'end_task': // 添加对 end_task 的处理
                 return { success: true, message: args.final_message || "任务已结束。" };
+           case 'insert_content':
+               result = await services.filesystem.insertContent(args);
+               return { success: result.success, content: result.success ? "内容插入成功。" : result.error };
+           case 'search_and_replace':
+               result = await services.filesystem.searchAndReplace(args);
+               return { success: result.success, content: result.success ? "搜索和替换成功。" : result.error };
+           case 'apply_diff':
+               result = await services.filesystem.applyDiff(args);
+               return { success: result.success, content: result.success ? "差异应用成功。" : result.error };
+            case 'search_files':
+                result = await services.filesystem.searchFiles(args);
+                return { success: result.success, content: result.results };
             default:
                 return { success: false, error: `未知工具: ${toolName}` };
         }
@@ -56,7 +68,11 @@ async function performToolExecution(toolCallId, toolName, toolArgs, mainWindow) 
                 // AI 已经通过 _sendAiResponseToFrontend('end_task', ...) 接收到最终消息
                 // 这里只需要返回一个成功的状态，不包含 content
                 finalMessage = toolResult.message || "任务已结束。";
-                return { result: { success: true, message: finalMessage } }; 
+                return { result: { success: true, message: finalMessage } };
+            } else if (toolName === "insert_content" || toolName === "search_and_replace" || toolName === "apply_diff") {
+               // 对于这些文件修改工具，我们可以发送一个通用消息，并更新文件树
+               mainWindow.webContents.send('update-current-file', toolArgs.path);
+               finalMessage = `文件 '${toolArgs.path}' 已通过 ${toolName} 操作成功修改。`;
             }
         } else {
             finalMessage = `${toolName} 操作失败: ${toolResult.error}`;

@@ -4,6 +4,21 @@ const tools = require('../tool-service/tools/definitions');
 const { state } = require('../state-manager');
 const { getFileTree } = require('../utils/file-tree-builder');
 
+// 服务级别的状态，用于存储持久化设置
+const serviceState = {
+    isStreaming: true, // 默认为流式
+};
+
+function setStreamingMode({ stream }) {
+    console.log(`[ChatService] 更新流式模式为: ${stream}`);
+    serviceState.isStreaming = stream;
+}
+
+// 新增 getter 函数以安全地暴露状态
+function getStreamingMode() {
+    return serviceState.isStreaming;
+}
+
 let aiResponseSendCount = 0;
 
 function resetResponseCount() {
@@ -19,8 +34,8 @@ function _sendAiResponseToFrontend(type, payload) {
     }
 }
 
-async function chatWithAI(latestUserMessageContent, modelId, customSystemPrompt) { // 新增 customSystemPrompt 参数
-    console.log(`[ChatService] 开始处理用户消息: ${latestUserMessageContent} (模型: ${modelId})`);
+async function* chatWithAI(messages, modelId, customSystemPrompt) {
+    console.log(`[ChatService] 开始处理聊天请求 (模型: ${modelId})`);
  
     try {
         await initializeModelProvider(); // 确保 ModelProvider 已初始化
@@ -80,10 +95,13 @@ async function chatWithAI(latestUserMessageContent, modelId, customSystemPrompt)
   - **注意：'end_task' 也必须以 'tool_calls' 形式生成。**
 
 **重要交互原则 - 请严格遵循以优化用户体验和效率：**
-1. **单步执行优先：** 除非任务性质要求必须同时进行，否则请尽量一次只建议一个工具操作。例如，如果用户请求创建多章内容，请逐章进行，每次只建议创建一章，等待用户确认和系统反馈后再建议下一章。
-2. **等待反馈：** 在建议并调用工具后，请耐心等待系统返回该工具的执行结果（成功或失败或被用户忽略）。只有收到反馈后，才能基于该反馈决定下一步的行动。
-3. **避免重复建议：** 如果系统反馈某个工具操作被用户忽略或未执行，请不要立即重复建议该操作，除非用户明确要求或任务逻辑需要。在重复之前，可尝试分析原因或询问用户意图。
-4. **简洁明了：** 你的响应应由简要的文本（可选）和精确的 'tool_calls' 构成，避免冗余信息。
+1. **工具选择策略：**
+   - **对于在现有文本行内进行插入或修改**，请优先使用 \`apply_diff\` 或 \`search_and_replace\` 工具。
+   - \`insert_content\` 工具主要用于**插入全新的、独立的行**。
+2. **单步执行优先：** 除非任务性质要求必须同时进行，否则请尽量一次只建议一个工具操作。例如，如果用户请求创建多章内容，请逐章进行，每次只建议创建一章，等待用户确认和系统反馈后再建议下一章。
+3. **等待反馈：** 在建议并调用工具后，请耐心等待系统返回该工具的执行结果（成功或失败或被用户忽略）。只有收到反馈后，才能基于该反馈决定下一步的行动。
+4. **避免重复建议：** 如果系统反馈某个工具操作被用户忽略或未执行，请不要立即重复建议该操作，除非用户明确要求或任务逻辑需要。在重复之前，可尝试分析原因或询问用户意图。
+5. **简洁明了：** 你的响应应由简要的文本（可选）和精确的 'tool_calls' 构成，避免冗余信息。
 
 **记住：你的响应应该由文本（可选）和精确的 'tool_calls' 构成，而不是描述。**`;
 
@@ -91,181 +109,154 @@ async function chatWithAI(latestUserMessageContent, modelId, customSystemPrompt)
                                      ? customSystemPrompt
                                      : DEFAULT_SYSTEM_PROMPT;
 
-       const systemMessageContent = `${effectiveSystemPrompt}\n${fileTreeContent}`; // 将文件树内容添加到系统消息中
+       // 提取系统消息，如果存在
+       const initialSystemMessage = messages.find(msg => msg.role === 'system');
+       const effectiveInitialSystemPrompt = initialSystemMessage ? initialSystemMessage.content : '';
 
-        const messagesToSend = [
-            { role: "system", content: systemMessageContent, name: "system" },
-            ...state.conversationHistory.map(msg => {
-                const deepseekMessage = {
-                    role: msg.role,
-                    content: msg.content,
-                };
-                // 仅包含 API 支持的字段
-                if (msg.name) deepseekMessage.name = msg.name;
-                if (msg.tool_calls) deepseekMessage.tool_calls = msg.tool_calls;
-                if (msg.tool_call_id) deepseekMessage.tool_call_id = msg.tool_call_id;
-                // 如果是 assistant 消息，并且存在 reasoning_content，则不传入
-                if (msg.role === 'assistant' && msg.reasoning_content) {
-                    // 不做任何操作，reasoning_content 不会被添加到 deepseekMessage
-                }
-                return deepseekMessage;
-            })
-        ];
+       // 将文件树内容添加到系统消息中
+       // 修正：将默认或自定义的系统提示与文件树内容正确合并
+       const systemMessageContent = `${effectiveSystemPrompt}\n${fileTreeContent}`;
+
+        // **关键修复**: 移除不安全的 .map() 重构。
+        // 直接过滤掉旧的 system 消息，然后 unshift 添加新的。
+        const messagesToSend = messages.filter(msg => msg.role !== 'system');
+        messagesToSend.unshift({ role: "system", content: systemMessageContent, name: "system" });
 
 console.log(`[ChatService] DEBUG: 发送给模型 (${modelId}) 的消息:`, JSON.stringify(messagesToSend, null, 2));
+        // 修改此处，处理流式响应
+        // 确保 conversationHistory 包含所有必要的消息，特别是对于后续的工具调用
+        // 暂时不将完整的 AI 响应存储到 conversationHistory，而是由外部处理
+        // 因为这里是生成器，每次 yield 都会返回一部分内容
+
         const aiResponse = await adapter.generateCompletion(messagesToSend, {
             model: modelId,
             tools: tools,
             tool_choice: "auto",
-            stream: false
+            stream: serviceState.isStreaming // 使用服务级别状态
         });
-console.log(`[ChatService] DEBUG: 从模型 (${modelId}) 收到原始响应:`, JSON.stringify(aiResponse, null, 2));
-console.log(`[ChatService] DEBUG: 解析 aiResponse 结构:`);
-console.log(`[ChatService] DEBUG:   aiResponse.content:`, aiResponse.content);
-console.log(`[ChatService] DEBUG:   aiResponse.reasoning_content:`, aiResponse.reasoning_content);
-console.log(`[ChatService] DEBUG:   aiResponse.tool_calls:`, aiResponse.tool_calls);
-console.log(`[ChatService] DEBUG:   aiResponse.choices[0].message.content:`, aiResponse.choices && aiResponse.choices[0] && aiResponse.choices[0].message ? aiResponse.choices[0].message.content : 'N/A');
-console.log(`[ChatService] DEBUG:   aiResponse.choices[0].message.tool_calls:`, aiResponse.choices && aiResponse.choices[0] && aiResponse.choices[0].message ? aiResponse.choices[0].message.tool_calls : 'N/A');
-console.log(`[ChatService] DEBUG:   aiResponse.choices[0].message.reasoning_content:`, aiResponse.choices && aiResponse.choices[0] && aiResponse.choices[0].message ? aiResponse.choices[0].message.reasoning_content : 'N/A');
 
-
-        const currentSessionId = state.conversationHistory.length > 0
+        let fullAssistantContent = "";
+        let finalToolCalls = [];
+        let finalReasoningContent = "";
+        let lastUsage = null;
+        let currentSessionId = state.conversationHistory.length > 0
             ? state.conversationHistory[0].sessionId
             : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        console.log(`[ChatService] chatWithAI - 确定当前会话 sessionId: ${currentSessionId}`);
 
-        let message = aiResponse; // 默认 aiResponse 就是 message 对象
-
-        // 如果 aiResponse 是一个包含 choices 数组的 completion 对象，则提取 message
-        if (aiResponse.choices && aiResponse.choices.length > 0 && aiResponse.choices[0].message) {
-            message = aiResponse.choices[0].message;
-        }
-
-        // 检查是否存在 end_task 工具调用
-        let hasEndTask = false;
-        if (message.tool_calls && message.tool_calls.length > 0) {
-            hasEndTask = message.tool_calls.some(call => call.function.name === "end_task");
-        }
-
-        // 将 AI 响应作为 assistant 消息存储到 conversationHistory，无论是否存在 end_task 工具调用
-        state.conversationHistory.push({
-            role: "assistant",
-            content: message.content || null,
-            reasoning_content: message.reasoning_content || null,
-            tool_calls: message.tool_calls || null,
-            sessionId: currentSessionId
-        });
-
-        let assistantContent = message.content || null;
-        let assistantText = message.content || '[无内容]';
-        let assistantToolCalls = message.tool_calls || null;
-        let reasoningContent = message.reasoning_content || null;
-
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            const endTaskCall = aiResponse.tool_calls.find(call => call.function.name === "end_task");
-            if (endTaskCall) {
-                try {
-                    const toolArgs = JSON.parse(endTaskCall.function.arguments);
-                    if (toolArgs.final_message) {
-                        assistantContent = toolArgs.final_message;
-                        assistantText = toolArgs.final_message;
-                    }
-                } catch (e) {
-                    console.error(`解析 end_task 工具参数失败: ${e.message}`);
+        if (serviceState.isStreaming) {
+            for await (const chunk of aiResponse) {
+                if (chunk.type === "text") {
+                    fullAssistantContent += chunk.text;
+                    yield { type: "text", content: chunk.text };
+                } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
+                    yield { type: "tool_calls", content: chunk.tool_calls };
+                    chunk.tool_calls.forEach(delta => {
+                        let existingCall = finalToolCalls.find(call => call.index === delta.index);
+                        if (!existingCall) {
+                            existingCall = { index: delta.index, id: null, type: 'function', function: { name: '', arguments: '' } };
+                            finalToolCalls.splice(delta.index, 0, existingCall);
+                        }
+                        if (delta.id) existingCall.id = delta.id;
+                        if (delta.function && delta.function.name) existingCall.function.name = delta.function.name;
+                        if (delta.function && delta.function.arguments) existingCall.function.arguments += delta.function.arguments;
+                    });
+                } else if (chunk.type === "reasoning") {
+                    finalReasoningContent += chunk.text;
+                    yield { type: "reasoning", content: chunk.text };
+                } else if (chunk.type === "usage") {
+                    lastUsage = chunk;
+                    yield { type: "usage", content: chunk };
                 }
+            }
+        } else {
+            // 非流式处理，但 adapter 仍然返回一个生成器，需要迭代它来构建完整响应
+            for await (const chunk of aiResponse) {
+                if (chunk.type === "text") {
+                    fullAssistantContent += chunk.text || '';
+                    if (chunk.reasoning_content) {
+                        finalReasoningContent += chunk.reasoning_content;
+                    }
+                } else if (chunk.type === "tool_calls") {
+                    finalToolCalls = chunk.tool_calls || [];
+                } else if (chunk.type === "usage") {
+                    lastUsage = chunk;
+                }
+            }
+            
+            // 模拟流式输出，以便下游代码统一处理
+            if (fullAssistantContent) {
+                yield { type: "text", content: fullAssistantContent };
+            }
+            if (finalToolCalls.length > 0) {
+                 yield { type: "tool_calls", content: finalToolCalls };
+            }
+            if (lastUsage) {
+                yield { type: "usage", content: lastUsage };
             }
         }
 
-        if (reasoningContent && modelId === 'deepseek-reasoner') { // 仅当模型是 deepseek-reasoner 时发送思维链
+        // 在流结束后，将完整的 assistant 消息添加到 conversationHistory
+        const messageToStore = {
+            role: "assistant",
+            content: fullAssistantContent || null,
+            reasoning_content: finalReasoningContent || null,
+            tool_calls: finalToolCalls || null,
+            sessionId: currentSessionId
+        };
+        state.conversationHistory.push(messageToStore);
+
+        // 如果有推理内容，发送给前端
+        if (finalReasoningContent) {
             _sendAiResponseToFrontend('reasoning_content', {
-                content: reasoningContent,
+                content: finalReasoningContent,
                 sessionId: currentSessionId
             });
         }
 
-        let endTaskTriggered = false; // 标记 end_task 是否被触发
-
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            const endTaskCall = aiResponse.tool_calls.find(call => call.function.name === "end_task");
-            if (endTaskCall) {
-                try {
-                    const toolArgs = JSON.parse(endTaskCall.function.arguments);
-                    const finalMessage = toolArgs.final_message || "任务已完成。";
-                    console.log(`[ChatService] Sending 'end_task' IPC. Final Message: ${finalMessage.substring(0, 100)}`);
-                    _sendAiResponseToFrontend('end_task', finalMessage);
-                    endTaskTriggered = true; // 标记 end_task 已触发
-
-                    await logger.logAiConversation(currentSessionId); // 记录日志
-                    return { type: 'processed', payload: 'AI 响应已处理' }; // end_task 是最终响应，直接返回
-                } catch (e) {
-                    console.error(`解析 end_task 工具参数失败或处理 end_task 过程中出错: ${e.message}`);
-                }
-            }
-        }
-
-        // 如果 end_task 没有被触发，并且有 assistantContent，则发送 text 类型消息
-        if (!endTaskTriggered && assistantContent && assistantContent !== '[无内容]') {
-            let contentToSend = assistantContent;
-            // 移除DeepSeek特有的工具调用标记，确保前端接收纯净内容
-            contentToSend = contentToSend.replace(/```json[\s\S]*?```\s*<｜tool call end｜>\s*<｜tool calls end｜>|<｜tool calls begin｜>[\s\S]*?<｜tool calls end｜>/g, '').trim();
-            if (contentToSend) {
-                console.log(`[ChatService] Sending 'text' IPC. Content: ${contentToSend.substring(0, 100)}`);
-                _sendAiResponseToFrontend('text', contentToSend);
-            }
-        }
-
-        // 继续处理其他工具调用（除了 end_task，因为它已经在上面处理了并且已经返回）
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            for (const toolCall of aiResponse.tool_calls) {
-                const toolName = toolCall.function.name;
-                if (toolName === "end_task") {
-                    continue; // end_task 已经在前面处理，跳过
-                }
-
+        // 处理 end_task 和 ask_user_question，它们仍然通过 IPC 发送
+        // **重构**: 统一处理所有工具调用，让前端决定如何渲染
+        if (finalToolCalls && finalToolCalls.length > 0) {
+            // 注意：旧的 pendingToolCalls 应该在工具执行后被清除，这里我们假设每次都是新的调用
+            const newPendingToolCalls = [];
+            for (const toolCall of finalToolCalls) {
                 let toolArgs;
                 try {
+                    // 预解析参数，方便前端使用
                     toolArgs = JSON.parse(toolCall.function.arguments);
                 } catch (e) {
-                    console.error(`解析工具参数失败: ${e.message}`);
-                    toolArgs = {};
+                    console.error(`[ChatService] 解析工具参数失败: ${e.message}`);
+                    toolArgs = { "error": "failed to parse arguments", "raw_arguments": toolCall.function.arguments };
                 }
 
-                if (toolName === "ask_user_question") {
-                    const question = toolArgs.question;
-                    const options = toolArgs.options || [];
-                    console.log(`[ChatService] Sending 'ask_user_question' IPC.`);
-                    _sendAiResponseToFrontend('ask_user_question', { question, options, toolCallId: toolCall.id });
-                    await logger.logAiConversation(currentSessionId);
-                    return { type: 'processed', payload: 'AI 响应已处理' };
-
-                } else { // 其他工具
-                    state.pendingToolCalls.push({
-                        toolCallId: toolCall.id,
-                        toolName: toolName,
-                        toolArgs: toolArgs,
-                        aiExplanation: `AI 建议执行 ${toolName} 操作。`,
-                        status: 'pending',
-                        result: null,
-                        sessionId: currentSessionId
-                    });
-                }
+                newPendingToolCalls.push({
+                    toolCallId: toolCall.id,
+                    toolName: toolCall.function.name,
+                    toolArgs: toolArgs,
+                    function: toolCall.function, // 保持 function 对象的完整性
+                    aiExplanation: `AI 建议执行 ${toolCall.function.name} 操作。`,
+                    status: 'pending',
+                    result: null,
+                    sessionId: currentSessionId
+                });
             }
 
+            // 将新解析的工具调用存入状态
+            state.pendingToolCalls = newPendingToolCalls;
+
+            // 统一通过 'tool_suggestions' 发送给前端
             if (state.pendingToolCalls.length > 0) {
                 _sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
-                return {
-                    type: 'pending_tools',
-                    payload: { sessionId: currentSessionId }
-                };
+                yield { type: 'pending_tools', payload: { sessionId: currentSessionId } };
             }
         }
 
-        if (!assistantContent && state.pendingToolCalls.length === 0) {
+        if (!fullAssistantContent && state.pendingToolCalls.length === 0) {
             _sendAiResponseToFrontend('error', 'AI 没有给出明确的回复或工具调用。');
+            yield { type: 'error', payload: 'AI 没有给出明确的回复或工具调用。' };
         }
 
         await logger.logAiConversation(currentSessionId);
-        return { type: 'processed', payload: 'AI 响应已处理' };
+        yield { type: 'processed', payload: 'AI 响应已处理' }; // 最终的成功标记
 
     } catch (error) {
         console.error(`[ChatService] 处理消息时出错: ${error.message}`);
@@ -274,208 +265,168 @@ console.log(`[ChatService] DEBUG:   aiResponse.choices[0].message.reasoning_cont
     }
 }
 
-async function sendToolResultToAI(toolResultsArray, modelId) {
+// **关键重构**: 将 sendToolResultToAI 改造为与 chatWithAI 类似的流式生成器
+async function* sendToolResultToAI(toolResultsArray, modelId) {
+    console.log(`[ChatService] 开始处理工具结果反馈 (模型: ${modelId})`);
     let currentSessionId;
     try {
-        await initializeModelProvider(); // 确保 ModelProvider 已初始化
+        await initializeModelProvider();
         const modelRegistry = getModelRegistry();
         const adapter = modelRegistry.getAdapterForModel(modelId);
 
         if (!adapter) {
             const errorMessage = `模型 '${modelId}' 不可用或未注册。`;
             console.warn(`[ChatService] sendToolResultToAI: ${errorMessage}`);
-            _sendAiResponseToFrontend('error', errorMessage);
-            return { type: 'error', payload: errorMessage };
+            yield { type: 'error', payload: errorMessage }; // 使用 yield
+            return;
         }
 
-        const toolMessages = toolResultsArray.map(item => ({
-            role: "tool",
-            tool_call_id: item.toolCallId,
-            name: item.toolName,
-            content: JSON.stringify(item.result)
-        }));
+        // **关键修复**：在映射之前过滤掉 end_task，因为它不应该有执行结果被发送回AI
+        const filteredToolResults = toolResultsArray.filter(item => item.toolName !== "end_task");
 
-        // 过滤掉 end_task 工具的执行结果，因为它的 assistant 消息没有被存储，避免上下文不匹配
-        const filteredToolMessages = toolMessages.filter(msg => msg.name !== "end_task");
-        state.conversationHistory.push(...filteredToolMessages);
-
-        const messagesToSend = state.conversationHistory.map(msg => {
-            const message = {
-                role: msg.role,
-                content: msg.content,
-            };
-            if (msg.name) message.name = msg.name;
-            if (msg.tool_calls) message.tool_calls = msg.tool_calls;
-            if (msg.tool_call_id) message.tool_call_id = msg.tool_call_id;
-            // 如果是 assistant 消息，并且存在 reasoning_content，则不传入
-            if (msg.role === 'assistant' && msg.reasoning_content) {
-                // 不做任何操作，reasoning_content 不会被添加到 message
+        const toolMessages = filteredToolResults.map(item => {
+            // 确保 result 存在且有意义，避免创建空的 tool message
+            if (!item.result) {
+                return null;
             }
-            return message;
-        });
+            const content = (item.result && typeof item.result.content === 'string')
+                          ? item.result.content
+                          : JSON.stringify(item.result);
 
-        console.log(`[ChatService] DEBUG: 发送给 DeepSeek 的工具结果消息:`, JSON.stringify(messagesToSend, null, 2));
+            return {
+                role: "tool",
+                tool_call_id: item.toolCallId,
+                name: item.toolName, // 关键修复：添加缺失的 toolName
+                content: content,
+            };
+        }).filter(Boolean); // 过滤掉 null 值
 
+        // 只有在确实有工具结果需要推送时才执行
+        if (toolMessages.length > 0) {
+            state.conversationHistory.push(...toolMessages);
+        }
+
+        // 使用与 chatWithAI 相同的逻辑构建 messagesToSend
+        // **关键修复**: 直接使用 state.conversationHistory，因为它应该包含所有格式正确的消息。
+        // 不再使用 .map() 进行不安全的重构，这正是导致空对象问题的根源。
+        // **关键修复**: 在将 conversationHistory 发送给 AI 之前，必须严格过滤，
+        // 只包含符合 API 规范的 a 'user', 'assistant', or 'tool' 角色的消息。
+        const messagesToSend = state.conversationHistory.filter(
+            msg => msg && ['user', 'assistant', 'tool'].includes(msg.role)
+        );
+
+
+        console.log(`[ChatService] DEBUG: 发送给模型 (${modelId}) 的工具结果消息:`, JSON.stringify(messagesToSend, null, 2));
+
+        // **关键修改**: 启用流式传输
         const aiResponse = await adapter.generateCompletion(messagesToSend, {
             model: modelId,
             tools: tools,
             tool_choice: "auto",
-            stream: false
+            stream: serviceState.isStreaming, // 使用服务级别状态
         });
 
-        currentSessionId = state.conversationHistory.length > 0
-            ? state.conversationHistory[0].sessionId
-            : (toolResultsArray.length > 0 ? toolResultsArray[0].sessionId : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-        console.log(`[ChatService] DEBUG: currentSessionId after declaration: ${currentSessionId}`);
+        // 复用 chatWithAI 的流式处理逻辑
+        let fullAssistantContent = "";
+        let finalToolCalls = [];
+        currentSessionId = state.conversationHistory.length > 0 ? state.conversationHistory.find(m => m.sessionId)?.sessionId : `${Date.now()}`;
 
-        // 检查是否存在 end_task 工具调用
-        let hasEndTask = false;
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            hasEndTask = aiResponse.tool_calls.some(call => call.function.name === "end_task");
-        }
-
-        // 仅当没有 end_task 工具调用时，才将 AI 响应作为 assistant 社消息存储到 conversationHistory
-        if (!hasEndTask) {
-            state.conversationHistory.push({
-                role: "assistant",
-                content: aiResponse.content || null,
-                reasoning_content: aiResponse.reasoning_content || null, // 新增
-                tool_calls: aiResponse.tool_calls || null,
-                sessionId: currentSessionId
-            });
-        }
-
-        let assistantContent = aiResponse.content || null;
-        let assistantToolCalls = aiResponse.tool_calls || null;
-        let assistantText = aiResponse.content || '[无内容]';
-        let reasoningContent = aiResponse.reasoning_content || null; // 新增
-
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            const endTaskCall = aiResponse.tool_calls.find(call => call.function.name === "end_task");
-            if (endTaskCall) {
-                try {
-                    const toolArgs = JSON.parse(endTaskCall.function.arguments);
-                    if (toolArgs.final_message) {
-                        assistantContent = toolArgs.final_message;
-                        assistantText = toolArgs.final_message;
-                    }
-                } catch (e) {
-                    console.error(`解析 end_task 工具参数失败: ${e.message}`);
-                }
-            }
-        }
-
-        if (reasoningContent && modelId === 'deepseek-reasoner') { // 仅当模型是 deepseek-reasoner 时发送思维链
-            _sendAiResponseToFrontend('reasoning_content', {
-                content: reasoningContent,
-                sessionId: currentSessionId
-            });
-        }
-
-        if (assistantText && assistantText !== '[无内容]') {
-            let contentToSend = assistantText;
-            // 移除DeepSeek特有的工具调用标记，确保前端接收纯净内容
-            contentToSend = contentToSend.replace(/```json[\s\S]*?```\s*<｜tool call end｜>\s*<｜tool calls end｜>|<｜tool calls begin｜>[\s\S]*?<｜tool calls end｜>/g, '').trim();
-            if (contentToSend) {
-                _sendAiResponseToFrontend('text', contentToSend);
-            }
-        }
-
-        let endTaskTriggered = false; // 标记 end_task 是否被触发
-
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            const endTaskCall = aiResponse.tool_calls.find(call => call.function.name === "end_task");
-            if (endTaskCall) {
-                try {
-                    const toolArgs = JSON.parse(endTaskCall.function.arguments);
-                    const finalMessage = toolArgs.final_message || "任务已完成。";
-                    console.log(`[ChatService] Sending 'end_task' IPC (sendToolResultToAI). Final Message: ${finalMessage.substring(0, 100)}`);
-                    _sendAiResponseToFrontend('end_task', finalMessage);
-                    endTaskTriggered = true; // 标记 end_task 已触发
-
-                    // 移除了将 end_task 记录到 conversationHistory 的逻辑，因为 end_task 不应作为对话历史的一部分
-                    // 避免 'tool' 消息后面没有 'tool_calls' 导致的 DeepSeek API 错误
-                    await logger.logAiConversation(currentSessionId); // 记录日志
-                    return { type: 'processed', payload: 'AI 响应已处理' }; // end_task 是最终响应，直接返回
-                } catch (e) {
-                    console.error(`解析 end_task 工具参数失败或处理 end_task 过程中出错: ${e.message}`);
-                }
-            }
-        }
-
-        // 如果 end_task 没有被触发，并且有 assistantText，则发送 text 类型消息
-        if (!endTaskTriggered && assistantText && assistantText !== '[无内容]') {
-            let contentToSend = assistantText;
-            // 移除DeepSeek特有的工具调用标记，确保前端接收纯净内容
-            contentToSend = contentToSend.replace(/```json[\s\S]*?```\s*<｜tool call end｜>\s*<｜tool calls end｜>|<｜tool calls begin｜>[\s\S]*?<｜tool calls end｜>/g, '').trim();
-            if (contentToSend) {
-                console.log(`[ChatService] Sending 'text' IPC (sendToolResultToAI). Content: ${contentToSend.substring(0, 100)}`);
-                _sendAiResponseToFrontend('text', contentToSend);
-            }
-        }
-
-        // 继续处理其他工具调用（除了 end_task，因为它已经在上面处理了并且已经返回）
-        if (aiResponse.tool_calls && aiResponse.tool_calls.length > 0) {
-            for (const toolCall of aiResponse.tool_calls) {
-                console.log(`[ChatService] sendToolResultToAI: 收到工具调用 ID: "${toolCall.id}", Name: "${toolCall.function.name}"`);
-                console.log(`[ChatService] sendToolResultToAI: 原始工具参数字符串: "${toolCall.function.arguments}"`);
-                const toolName = toolCall.function.name;
-                if (toolName === "end_task") {
-                    continue; // end_task 已经在前面处理，跳过
-                }
-
-                let toolArgs;
-                try {
-                    toolArgs = JSON.parse(toolCall.function.arguments);
-                    console.log(`[ChatService] sendToolResultToAI: 解析后的工具参数:`, toolArgs);
-                } catch (e) {
-                    console.error(`[ChatService] sendToolResultToAI: 解析工具参数失败 (toolCallId: ${toolCall.id}):`, e);
-                    toolArgs = {};
-                }
-
-                if (toolName === "ask_user_question") {
-                    const question = toolArgs.question;
-                    const options = toolArgs.options || [];
-                    console.log(`[ChatService] Sending 'ask_user_question' IPC (sendToolResultToAI).`);
-                    _sendAiResponseToFrontend('ask_user_question', { question, options, toolCallId: toolCall.id });
-                    return { type: 'processed', payload: 'AI 响应已处理' };
-                } else {
-                    state.pendingToolCalls.push({
-                        toolCallId: toolCall.id,
-                        toolName: toolName,
-                        toolArgs: toolArgs,
-                        aiExplanation: `AI 建议执行 ${toolName} 操作。`,
-                        status: 'pending',
-                        result: null,
-                        sessionId: currentSessionId
+        if (serviceState.isStreaming) {
+            for await (const chunk of aiResponse) {
+                if (chunk.type === "text") {
+                    fullAssistantContent += chunk.text;
+                    yield { type: "text", content: chunk.text, sessionId: currentSessionId };
+                } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
+                    yield { type: "tool_calls", content: chunk.tool_calls };
+                    chunk.tool_calls.forEach(delta => {
+                        let existingCall = finalToolCalls.find(call => call.index === delta.index);
+                        if (!existingCall) {
+                            existingCall = {
+                                index: delta.index,
+                                id: null,
+                                type: 'function',
+                                function: { name: '', arguments: '' }
+                            };
+                            finalToolCalls.splice(delta.index, 0, existingCall);
+                        }
+                        if (delta.id) existingCall.id = delta.id;
+                        if (delta.function && delta.function.name) existingCall.function.name = delta.function.name;
+                        if (delta.function && delta.function.arguments) existingCall.function.arguments += delta.function.arguments;
                     });
                 }
+                // 可以根据需要添加对 'reasoning' 和 'usage' 的处理
+            }
+        } else {
+            // 非流式处理，但 adapter 仍然返回一个生成器，需要迭代它来构建完整响应
+            for await (const chunk of aiResponse) {
+                if (chunk.type === "text") {
+                    fullAssistantContent += chunk.text || '';
+                } else if (chunk.type === "tool_calls") {
+                    finalToolCalls = chunk.tool_calls || [];
+                }
+            }
+            
+            // 模拟流式输出
+            if (fullAssistantContent) {
+                yield { type: "text", content: fullAssistantContent, sessionId: currentSessionId };
+            }
+            if (finalToolCalls.length > 0) {
+                yield { type: "tool_calls", content: finalToolCalls };
+            }
+        }
+
+        // 在流结束后，将完整的 assistant 消息添加到 conversationHistory
+        const messageToStore = {
+            role: "assistant",
+            content: fullAssistantContent || null,
+            tool_calls: finalToolCalls.length > 0 ? finalToolCalls : null,
+            sessionId: currentSessionId
+        };
+        state.conversationHistory.push(messageToStore);
+
+        // **重构**: 统一处理所有工具调用，让前端决定如何渲染
+        if (finalToolCalls && finalToolCalls.length > 0) {
+            // 注意：旧的 pendingToolCalls 应该在工具执行后被清除，这里我们假设每次都是新的调用
+            const newPendingToolCalls = [];
+            for (const toolCall of finalToolCalls) {
+                let toolArgs;
+                try {
+                    // 预解析参数，方便前端使用
+                    toolArgs = JSON.parse(toolCall.function.arguments);
+                } catch (e) {
+                    console.error(`[ChatService] 解析工具参数失败: ${e.message}`);
+                    toolArgs = { "error": "failed to parse arguments", "raw_arguments": toolCall.function.arguments };
+                }
+
+                newPendingToolCalls.push({
+                    toolCallId: toolCall.id,
+                    toolName: toolCall.function.name,
+                    toolArgs: toolArgs,
+                    function: toolCall.function, // 保持 function 对象的完整性
+                    aiExplanation: `AI 建议执行 ${toolCall.function.name} 操作。`,
+                    status: 'pending',
+                    result: null,
+                    sessionId: currentSessionId
+                });
             }
 
+            // 将新解析的工具调用存入状态
+            state.pendingToolCalls = newPendingToolCalls;
+
+            // 统一通过 'tool_suggestions' 发送给前端
             if (state.pendingToolCalls.length > 0) {
                 _sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
-                console.log('[ChatService] sendToolResultToAI: 强制发送 tool_suggestions 更新 UI，包含所有 pendingToolCalls。');
-                return { type: 'pending_tools', payload: '有待处理的工具建议，已强制更新 UI。' };
+                yield { type: 'pending_tools', payload: { sessionId: currentSessionId } };
             }
         }
-
-        if (!assistantContent && state.pendingToolCalls.length === 0) {
-            _sendAiResponseToFrontend('error', 'AI 没有给出明确的回复或工具调用。');
-        }
-
-        console.log(`[ChatService] DEBUG: Reached end of sendToolResultToAI. currentSessionId: ${currentSessionId}`);
+        
         await logger.logAiConversation(currentSessionId);
-        return { type: 'processed', payload: 'AI 响应已处理' };
+        yield { type: 'processed', payload: '工具反馈响应已处理' };
 
     } catch (error) {
         console.error("sendToolResultToAI: 再次调用 AI API 失败:", error);
-        if (error.response && error.response.data) {
-            console.error("sendToolResultToAI: AI API 错误详情:", error.response.data);
-            _sendAiResponseToFrontend('error', `AI 反馈失败: ${error.message} (${JSON.stringify(error.response.data)})`);
-        } else {
-            _sendAiResponseToFrontend('error', `AI 反馈失败: ${error.message}`);
-        }
-        throw error;
+        yield { type: 'error', payload: `AI 反馈失败: ${error.message}` }; // 使用 yield
+        // 不再抛出错误，而是通过流传递错误
     }
 }
 
@@ -483,5 +434,7 @@ module.exports = {
     chatWithAI,
     sendToolResultToAI,
     resetResponseCount,
-    _sendAiResponseToFrontend
+    _sendAiResponseToFrontend,
+    setStreamingMode,
+    getStreamingMode // 导出 getter
 };

@@ -1,57 +1,59 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { setNovelContent, createNovelFile, updateNovelTitle } from '../store/slices/novelSlice';
+import { createNovelFile, updateNovelTitle, updateTabContent, startDiff, endDiff } from '../store/slices/novelSlice';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import HardBreak from '@tiptap/extension-hard-break';
+import DiffViewer from './DiffViewer'; // 引入 DiffViewer
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faSave, faExchangeAlt } from '@fortawesome/free-solid-svg-icons'; // 添加图标
 
 import './EditorPanel.css';
-import NotificationModal from './NotificationModal'; // 新增
+import NotificationModal from './NotificationModal';
  
 import useIpcRenderer from '../hooks/useIpcRenderer';
+import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tiptap-helpers.js';
  
-function EditorPanel() {
+ function EditorPanel() {
   const dispatch = useDispatch();
-  const novelContent = useSelector((state) => state.novel.novelContent);
-  const currentFile = useSelector((state) => state.novel.currentFile);
+  const { openTabs, activeTabId } = useSelector((state) => state.novel);
+  const activeTab = openTabs.find(tab => tab.id === activeTabId);
+
   const editorRef = useRef(null);
   const TiptapEditorInstance = useRef(null);
   const titleInputRef = useRef(null);
-  const initialContentRef = useRef('');
+  const initialContentRef = useRef(activeTab?.content); // 用 activeTab 的内容初始化
   const { invoke } = useIpcRenderer();
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [showModal, setShowModal] = useState(false); // 新增
-  const [modalMessage, setModalMessage] = useState(''); // 新增
+  // hasUnsavedChanges 将直接从 activeTab.isDirty 派生
+  const [showModal, setShowModal] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
+  const [paragraphs, setParagraphs] = useState([]);
+  const lineNumbersRef = useRef(null);
  
   // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
   // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
   // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
   const saveContent = useCallback(
-    async (isManualSave = false) => { // 添加参数判断是否为手动保存
-      const filePath = currentFile;
-      const content = TiptapEditorInstance.current?.getHTML();
+    async (isManualSave = false) => {
+      if (!activeTab) {
+        console.warn('无法保存：没有激活的标签页。');
+        return { success: false, error: '没有激活的标签页。' };
+      }
+
+      const { id: filePath, content } = activeTab;
 
       console.log('[EditorPanel] saveContent: 尝试保存文件，filePath:', filePath);
 
-      // 如果没有选择文件，直接返回失败，不再弹窗
-      if (!filePath || filePath === '未选择') {
-        console.warn('无法保存文件：文件路径无效或未选择文件。', filePath);
-        return { success: false, error: '文件路径无效或未选择文件。' };
-      }
-
-      // 如果内容未定义，直接返回失败，不再弹窗
-      if (content === undefined) {
-        console.warn('无法获取编辑器内容进行保存。');
-        return { success: false, error: '无法获取编辑器内容。' };
+      if (!filePath) {
+        console.warn('无法保存文件：文件路径无效。', filePath);
+        return { success: false, error: '文件路径无效。' };
       }
 
       try {
         const result = await invoke('save-novel-content', filePath, content);
         if (!result.success) {
           console.error('文件保存失败:', result.error);
-          // 仅在手动保存时弹窗失败提示
           if (isManualSave) {
             setModalMessage(`文件保存失败: ${result.error}`);
             setShowModal(true);
@@ -59,12 +61,12 @@ function EditorPanel() {
           return { success: false, error: result.error };
         } else {
           console.log('文件保存成功！');
-          initialContentRef.current = content;
-          setHasUnsavedChanges(false);
+          // 保存成功后，更新状态
+          dispatch(updateTabContent({ tabId: filePath, content, isDirty: false }));
+          initialContentRef.current = content; // 更新 initialContent
           if (window.electron) {
             window.electron.setUnsavedChanges(false);
           }
-          // 仅在手动保存时弹窗成功提示
           if (isManualSave) {
             setModalMessage('文件保存成功！');
             setShowModal(true);
@@ -73,7 +75,6 @@ function EditorPanel() {
         }
       } catch (error) {
         console.error('保存过程中发生异常:', error);
-        // 仅在手动保存时弹窗异常提示
         if (isManualSave) {
            setModalMessage(`保存过程中发生异常: ${error.message}`);
            setShowModal(true);
@@ -81,7 +82,7 @@ function EditorPanel() {
         return { success: false, error: error.message };
       }
     },
-    [invoke, currentFile]
+    [invoke, activeTab, dispatch]
   );
  
   // 使用 useRef 存储 saveContent 的最新引用
@@ -182,22 +183,34 @@ function EditorPanel() {
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [isTitleEditing, setIsTitleEditing] = useState(false);
  
+  const updateParagraphs = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (editorRef.current) {
+        const paragraphNodes = editorRef.current.querySelectorAll('.ProseMirror p');
+        const newParagraphs = Array.from(paragraphNodes).map(p => ({
+          top: p.offsetTop,
+        }));
+        setParagraphs(newParagraphs);
+      }
+    });
+  }, []);
+
   const handleEditorChange = useCallback(({ editor }) => {
-    const newContent = editor.getHTML();
-    dispatch(setNovelContent(newContent));
-    console.log('[EditorPanel] handleEditorChange: currentFile:', currentFile);
+    if (!activeTab) return;
+
+    const jsonContent = editor.getJSON();
+    const newContent = convertTiptapJsonToText(jsonContent);
+    
+    // 派发 action 更新 tab 内容和 isDirty 状态
+    dispatch(updateTabContent({ tabId: activeTab.id, content: newContent }));
 
     const changed = newContent !== initialContentRef.current;
-    setHasUnsavedChanges(prevHasUnsavedChanges => {
-      if (changed !== prevHasUnsavedChanges) {
-        if (window.electron) {
-          window.electron.setUnsavedChanges(changed);
-        }
-        return changed;
-      }
-      return prevHasUnsavedChanges;
-    });
-  }, [dispatch, currentFile]);
+    if (window.electron) {
+        window.electron.setUnsavedChanges(changed);
+    }
+
+    updateParagraphs();
+  }, [dispatch, activeTab?.id, updateParagraphs]); // 依赖于 activeTab.id 而不是整个对象
  
   const handleEditorClick = useCallback((e) => {
     const editor = TiptapEditorInstance.current;
@@ -216,59 +229,79 @@ function EditorPanel() {
     }
   }, []);
 
+  // Effect 1: Manages the lifecycle (creation/destruction) of the Tiptap instance.
+  // It runs ONLY when the tab ID or view mode changes.
   useEffect(() => {
-    if (!TiptapEditorInstance.current) {
-      TiptapEditorInstance.current = new Editor({
-        element: editorRef.current,
-        extensions: [
-          StarterKit,
-        ],
-        content: typeof novelContent === 'string' ? novelContent : '',
-        onUpdate: handleEditorChange,
-        onFocus: ({ editor }) => {
-          editor.commands.focus();
-        },
-      });
-      initialContentRef.current = typeof novelContent === 'string' ? novelContent : '';
-      setHasUnsavedChanges(false);
-      if (window.electron) {
-        window.electron.setUnsavedChanges(false);
+    if (activeTab && activeTab.viewMode === 'edit' && editorRef.current) {
+      // If we are in the correct view and an instance doesn't exist, create one.
+      if (!TiptapEditorInstance.current) {
+        console.log(`[Lifecycle] Creating new Tiptap instance for tab: ${activeTab.id}`);
+        const editor = new Editor({
+          element: editorRef.current,
+          extensions: [StarterKit.configure()],
+          content: convertTextToTiptapJson(activeTab.content),
+          onUpdate: handleEditorChange,
+        });
+        TiptapEditorInstance.current = editor;
+        initialContentRef.current = activeTab.content;
+        setTimeout(updateParagraphs, 50);
+      }
+    } else {
+      // If we are not in edit mode (e.g., in diff view or no tab is active),
+      // or if the editor DOM ref is not available, ensure the instance is destroyed.
+      if (TiptapEditorInstance.current) {
+        console.log(`[Lifecycle] Destroying Tiptap instance for tab: ${activeTab?.id}`);
+        TiptapEditorInstance.current.destroy();
+        TiptapEditorInstance.current = null;
       }
     }
- 
-    if (TiptapEditorInstance.current) {
-      TiptapEditorInstance.current.setOptions({ onUpdate: handleEditorChange });
-    }
- 
+
+    // A cleanup function that runs when the dependencies change, before the effect runs again.
     return () => {
       if (TiptapEditorInstance.current) {
+        console.log(`[Lifecycle] Cleanup: Destroying Tiptap instance.`);
         TiptapEditorInstance.current.destroy();
         TiptapEditorInstance.current = null;
       }
     };
-  }, [handleEditorChange]);
+  }, [activeTab?.id, activeTab?.viewMode]); // Precise dependencies
 
+  // Effect 2: Synchronizes content from Redux to an EXISTING Tiptap instance.
+  // It runs ONLY when the content in Redux changes.
   useEffect(() => {
-    const contentToSet = typeof novelContent === 'string' ? novelContent : '';
-    if (TiptapEditorInstance.current && contentToSet !== TiptapEditorInstance.current.getHTML()) {
-      TiptapEditorInstance.current.commands.setContent(contentToSet, false);
-      initialContentRef.current = contentToSet;
-      setHasUnsavedChanges(false);
-      if (window.electron) {
-        window.electron.setUnsavedChanges(false);
+    // Check if an instance exists and if the content in Redux is different from the editor's content.
+    if (TiptapEditorInstance.current && activeTab) {
+      const editorContent = convertTiptapJsonToText(TiptapEditorInstance.current.getJSON());
+      
+      // This check is crucial. It prevents a loop where user input updates Redux,
+      // which then updates the editor, interrupting the user's typing.
+      // This now only runs for external changes (like `syncFileContent`).
+      if (editorContent !== activeTab.content) {
+        console.log(`[Sync] Content in Redux differs. Syncing to Tiptap for tab: ${activeTab.id}`);
+        const { from, to } = TiptapEditorInstance.current.state.selection;
+        TiptapEditorInstance.current.commands.setContent(convertTextToTiptapJson(activeTab.content), false);
+        // Attempt to restore selection
+        TiptapEditorInstance.current.commands.setTextSelection({ from, to });
+        initialContentRef.current = activeTab.content;
+        setTimeout(updateParagraphs, 50);
       }
     }
-  }, [novelContent]);
+  }, [activeTab?.content]); // Precise dependency
+
+  // Effect for updating the 'isDirty' status in the main process
+  useEffect(() => {
+    if (window.electron && activeTab) {
+      window.electron.setUnsavedChanges(activeTab.isDirty);
+    }
+  }, [activeTab?.isDirty]);
 
   useEffect(() => {
-    console.log('[EditorPanel] useEffect [currentFile]: currentFile 变化:', currentFile);
-    if (currentFile) {
-      const pureTitle = currentFile.replace(/^novel\//, '').replace(/\.txt$/, '');
-      setTitle(pureTitle);
+    if (activeTab) {
+      setTitle(activeTab.title);
     } else {
       setTitle('未命名');
     }
-  }, [currentFile]);
+  }, [activeTab?.id, activeTab?.title]); // Depend on specific properties
 
   const handleContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -322,29 +355,25 @@ function EditorPanel() {
   const isSelectionActive = TiptapEditorInstance.current ? !TiptapEditorInstance.current.state.selection.empty : false;
 
   const handleTitleSave = useCallback(async () => {
-    const pureCurrentTitle = currentFile ? currentFile.replace(/^novel\//, '').replace(/\.txt$/, '') : '';
+    if (!activeTab) return;
+
+    const pureCurrentTitle = activeTab.title;
 
     if (title && title !== pureCurrentTitle) {
       try {
-        await dispatch(updateNovelTitle({ oldFilePath: currentFile, newTitle: title })).unwrap();
+        await dispatch(updateNovelTitle({ oldFilePath: activeTab.id, newTitle: title })).unwrap();
         console.log('标题保存成功:', title);
       } catch (error) {
         console.error('标题保存失败:', error);
-        // 不在标题保存失败时弹窗，只打印错误
-        // alert(`标题保存失败: ${error}`);
       }
     }
-    if (currentFile) {
-      const updatedPureTitle = currentFile.replace(/^novel\//, '').replace(/\.txt$/, '');
-      setTitle(updatedPureTitle);
-    }
     setIsTitleEditing(false);
-  }, [dispatch, title, currentFile]);
+  }, [dispatch, title, activeTab?.id, activeTab?.title]); // Depend on specific properties
 
 
   return (
     <>
-      {(!currentFile || currentFile === '未选择') ? (
+      {!activeTab ? (
         <div className="no-file-selected-panel">
           <button
             className="action-button create-file-button"
@@ -352,16 +381,9 @@ function EditorPanel() {
           >
             创建新文件
           </button>
-          <button
-            className="action-button close-tab-button"
-            onClick={handleCloseTab}
-          >
-            关闭标签页
-          </button>
         </div>
       ) : (
         <div className="editor-panel-content">
-          {console.log('[EditorPanel] Render: currentFile:', currentFile, 'hasUnsavedChanges:', hasUnsavedChanges)}
           <div className="title-bar">
             <input
               type="text"
@@ -374,9 +396,7 @@ function EditorPanel() {
                   setTitle('');
                 }
               }}
-              onBlur={async () => {
-                await handleTitleSave();
-              }}
+              onBlur={handleTitleSave}
               onKeyDown={async (e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -387,53 +407,51 @@ function EditorPanel() {
                 }
               }}
             />
-            <button className="save-button" onClick={handleSaveButtonClick}>
+            <button className="save-button" onClick={() => saveContent(true)}>
               <FontAwesomeIcon icon={faSave} />
             </button>
-            {hasUnsavedChanges && <span className="unsaved-indicator">*</span>}
+            {/* 临时的 Diff 触发按钮 */}
+            {activeTab.isDirty && <span className="unsaved-indicator">*</span>}
           </div>
-          <div
-            ref={editorRef}
-            className="tiptap-editor"
-            onContextMenu={handleContextMenu}
-            onClick={handleEditorClick}
-          ></div>
-          {showContextMenu && (
-            <div
-              className="context-menu"
-              style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
-            >
-              <div
-                className={`context-menu-item ${isSelectionActive ? '' : 'disabled'}`}
-                onClick={() => handleMenuItemClick('cut')}
-              >
-                剪切
-              </div>
-              <div
-                className="context-menu-item"
-                onClick={() => handleMenuItemClick('copy')}
-              >
-                复制
-              </div>
-              <div
-                className="context-menu-item"
-                onClick={() => handleMenuItemClick('paste')}
-              >
-                粘贴
-              </div>
-              <div
-                className="context-menu-item"
-                onClick={() => handleMenuItemClick('insert')}
-              >
-                插入
-              </div>
-              <div
-                className="context-menu-item"
-                onClick={() => handleMenuItemClick('selectAll')}
-              >
-                全选
-              </div>
+
+          {activeTab.viewMode === 'diff' ? (
+            <div className="diff-view-wrapper">
+              <DiffViewer
+                originalContent={activeTab.content}
+                currentContent={activeTab.suggestedContent}
+              />
             </div>
+          ) : (
+            <>
+              <div className="editor-container">
+                <div className="line-numbers-gutter" ref={lineNumbersRef}>
+                  {paragraphs.map((p, index) => (
+                    <div key={index} className="line-number" style={{ top: `${p.top}px` }}>
+                      {index + 1}
+                    </div>
+                  ))}
+                </div>
+                <div
+                  ref={editorRef}
+                  className="tiptap-editor"
+                  onContextMenu={handleContextMenu}
+                  onClick={handleEditorClick}
+                  onScroll={(e) => {
+                    if (lineNumbersRef.current) {
+                      lineNumbersRef.current.scrollTop = e.target.scrollTop;
+                    }
+                  }}
+                ></div>
+              </div>
+              {showContextMenu && (
+                <div
+                  className="context-menu"
+                  style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
+                >
+                  {/* Context menu items... */}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

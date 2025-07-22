@@ -1,7 +1,7 @@
 import React, { useEffect, useCallback, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import useIpcRenderer from '../hooks/useIpcRenderer';
-import { setNovelContent, setCurrentFile, setChapters, triggerChapterRefresh } from '../store/slices/novelSlice'; // 导入 triggerChapterRefresh
+import { setChapters, triggerChapterRefresh, openTab } from '../store/slices/novelSlice'; // 导入 openTab, 移除旧的
 import './ChapterTreePanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faGear, faCaretRight, faCaretDown, faFolderPlus, faFileCirclePlus, faFolder, faFile, faRotate } from '@fortawesome/free-solid-svg-icons'; // 导入新图标和刷新图标
@@ -9,10 +9,13 @@ import CombinedIcon from './CombinedIcon';
 import ContextMenu from './ContextMenu'; // 引入 ContextMenu 组件
 import NotificationModal from './NotificationModal'; // 新增
 import ConfirmationModal from './ConfirmationModal'; // 新增
+import CheckpointPanel from './CheckpointPanel'; // 引入版本历史面板
+import { faHistory } from '@fortawesome/free-solid-svg-icons'; // 引入历史图标
 
 function ChapterTreePanel() {
   const chapters = useSelector((state) => state.novel.chapters);
   const refreshCounter = useSelector((state) => state.novel.refreshCounter); // 监听 refreshCounter
+  const [currentView, setCurrentView] = useState('chapters'); // 'chapters' or 'checkpoints'
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [currentRenameItemId, setCurrentRenameItemId] = useState(null);
   const [currentRenameItemTitle, setCurrentRenameItemTitle] = useState('');
@@ -159,7 +162,7 @@ function ChapterTreePanel() {
     fetchChapters();
   }, [refreshCounter, fetchChapters]); // 将 refreshCounter 作为依赖
 
-  const handleChapterClick = async (item) => {
+  const handleChapterClick = (item) => {
     if (item.isFolder) {
       // 点击文件夹则展开/折叠
       setCollapsedChapters(prev => ({
@@ -167,19 +170,9 @@ function ChapterTreePanel() {
         [item.id]: !prev[item.id]
       }));
     } else {
-      // 点击文件则加载内容
-      console.log(`点击了文件: ${item.id}`);
-      try {
-        const result = await invoke('load-chapter-content', item.id);
-        if (result.success) {
-          dispatch(setNovelContent(result.content));
-          dispatch(setCurrentFile(item.id)); // 更新为完整路径
-        } else {
-          console.error(`加载章节内容失败: ${item.id}`, result.error);
-        }
-      } catch (error) {
-        console.error(`调用 load-chapter-content IPC 失败: ${item.id}`, error);
-      }
+      // 点击文件则派发 openTab action
+      console.log(`请求打开文件: ${item.id}`);
+      dispatch(openTab(item.id));
     }
   };
 
@@ -270,8 +263,8 @@ function ChapterTreePanel() {
     setConfirmationMessage(`确定要删除 "${itemId}" 吗？`);
     setOnConfirmCallback(() => async () => {
       setShowConfirmationModal(false); // 关闭确认弹窗
-      dispatch(setNovelContent('')); // 清空编辑器内容
-      dispatch(setCurrentFile(null)); // 清空当前文件
+      // dispatch(setNovelContent('')); // 不再需要，由 tab 关闭逻辑处理
+      // dispatch(setCurrentFile(null)); // 不再需要
       await handleIPCAction('delete-item', itemId);
     });
     setOnCancelCallback(() => () => {
@@ -335,7 +328,7 @@ function ChapterTreePanel() {
 
     if (result.success) {
       // 如果重命名的是当前打开的文件，则更新当前文件路径
-      dispatch(setCurrentFile(result.newFilePath || finalNewTitle)); // result.newFilePath 应该由后端返回
+      // dispatch(setCurrentFile(result.newFilePath || finalNewTitle)); // 不再需要，由 tab 状态处理
       // 在重命名操作完成后，触发主进程的焦点修复
       invoke('trigger-focus-fix');
     }
@@ -555,17 +548,25 @@ function ChapterTreePanel() {
         <button className="refresh-button" onClick={fetchChapters} title="刷新章节列表">
           <FontAwesomeIcon icon={faRotate} />
         </button>
+        {/* 新增的版本历史按钮 */}
+        <button className="checkpoint-button" onClick={() => setCurrentView(currentView === 'chapters' ? 'checkpoints' : 'chapters')} title="查看版本历史">
+          <FontAwesomeIcon icon={faHistory} />
+        </button>
       </div>
 
-      <div className="main-chapter-area"> {/* 新增的 div */}
-        <div className="chapter-tree-panel-content" onContextMenu={(e) => handleContextMenu(e, null, false, null, '')}>
-          {chapters.length === 0 ? (
-            <p className="no-chapters-message">暂无文件</p>
-          ) : (
-            renderChapterTree(chapters)
-          )}
-        </div>
-      </div> {/* 新增的 div 结束 */}
+      <div className="main-chapter-area">
+        {currentView === 'chapters' ? (
+          <div className="chapter-tree-panel-content" onContextMenu={(e) => handleContextMenu(e, null, false, null, '')}>
+            {chapters.length === 0 ? (
+              <p className="no-chapters-message">暂无文件</p>
+            ) : (
+              renderChapterTree(chapters)
+            )}
+          </div>
+        ) : (
+          <CheckpointPanel />
+        )}
+      </div>
 
       {contextMenu.show && (
         <ContextMenu

@@ -50,29 +50,129 @@ export const updateNovelTitle = createAsyncThunk(
   }
 );
 
+// 异步 action 来打开或切换标签页
+export const openTab = createAsyncThunk(
+  'novel/openTab',
+  async (filePath, { dispatch, getState, rejectWithValue }) => {
+    const { novel } = getState();
+    const existingTab = novel.openTabs.find(tab => tab.id === filePath);
+
+    if (existingTab) {
+      dispatch(setActiveTab(filePath));
+      return { isExisting: true, filePath };
+    }
+
+    try {
+      if (window.ipcRenderer) {
+        // 修正：使用正确的 IPC 通道 'load-chapter-content'
+        const result = await window.ipcRenderer.invoke('load-chapter-content', filePath);
+        if (result.success) {
+          return { filePath, content: result.content, isExisting: false };
+        } else {
+          throw new Error(result.error);
+        }
+      } else {
+        console.warn('ipcRenderer is not available. Simulating file open.');
+        return { filePath, content: `模拟内容 for ${filePath}`, isExisting: false };
+      }
+    } catch (error) {
+      console.error(`Failed to open or read file ${filePath}:`, error);
+      return rejectWithValue(error.message);
+    }
+  }
+);
+
 const novelSlice = createSlice({
   name: 'novel',
   initialState: {
-    novelContent: '',
-    currentFile: '未选择',
+    openTabs: [], // { id, title, content, originalContent, suggestedContent, isDirty, viewMode }
+    activeTabId: null,
     chapters: [], // 用于存储章节列表
     status: 'idle', // 'idle' | 'loading' | 'succeeded' | 'failed'
     error: null,
-    refreshCounter: 0, // 新增：用于触发章节列表刷新的计数器
+    refreshCounter: 0,
   },
   reducers: {
-    setNovelContent: (state, action) => {
-      state.novelContent = action.payload;
+    setActiveTab: (state, action) => {
+      state.activeTabId = action.payload;
     },
-    setCurrentFile: (state, action) => {
-      console.log('[novelSlice] setCurrentFile: payload:', action.payload); // 新增日志
-      state.currentFile = action.payload;
+    closeTab: (state, action) => {
+      const tabIdToClose = action.payload;
+      const tabIndex = state.openTabs.findIndex(tab => tab.id === tabIdToClose);
+
+      if (tabIndex === -1) return;
+
+      // 移除标签页
+      state.openTabs.splice(tabIndex, 1);
+
+      // 如果关闭的是当前激活的标签页，则决定下一个激活的标签页
+      if (state.activeTabId === tabIdToClose) {
+        if (state.openTabs.length > 0) {
+          // 优先激活右边的，如果不存在则激活左边的
+          const newActiveIndex = Math.min(tabIndex, state.openTabs.length - 1);
+          state.activeTabId = state.openTabs[newActiveIndex].id;
+        } else {
+          state.activeTabId = null;
+        }
+      }
     },
-    setChapters: (state, action) => { // 设置章节列表
+    updateTabContent: (state, action) => {
+      const { tabId, content, isDirty } = action.payload;
+      const tab = state.openTabs.find(t => t.id === tabId);
+      if (tab) {
+        tab.content = content;
+        // isDirty 可以被显式传递，例如在保存成功后设为 false
+        tab.isDirty = isDirty !== undefined ? isDirty : true;
+      }
+    },
+    startDiff: (state, action) => {
+      const { tabId, suggestion } = action.payload;
+      const tab = state.openTabs.find(t => t.id === tabId);
+      if (tab) {
+        tab.suggestedContent = suggestion;
+        tab.viewMode = 'diff';
+      }
+    },
+    acceptSuggestion: (state, action) => {
+        const tabId = action.payload;
+        const tab = state.openTabs.find(t => t.id === tabId);
+        if (tab && tab.viewMode === 'diff') {
+            tab.content = tab.suggestedContent;
+            tab.suggestedContent = null;
+            tab.viewMode = 'edit';
+            tab.isDirty = true;
+        }
+    },
+    rejectSuggestion: (state, action) => {
+        const tabId = action.payload;
+        const tab = state.openTabs.find(t => t.id === tabId);
+        if (tab && tab.viewMode === 'diff') {
+            tab.suggestedContent = null;
+            tab.viewMode = 'edit';
+        }
+    },
+    setChapters: (state, action) => {
       state.chapters = action.payload;
     },
-    triggerChapterRefresh: (state) => { // 用于触发章节列表刷新
-      state.refreshCounter += 1; // 每次 dispatch 时递增计数器
+    triggerChapterRefresh: (state) => {
+      state.refreshCounter += 1;
+    },
+    // 新增：用于接收后端推送的最新文件内容并同步状态
+    syncFileContent: (state, action) => {
+        const { filePath, newContent } = action.payload;
+        // 关键修复：规范化后端传来的路径，移除 'novel/' 前缀以匹配 tab.id
+        const cleanFilePath = filePath.startsWith('novel/') ? filePath.substring(6) : filePath;
+        const tab = state.openTabs.find(t => t.id === cleanFilePath);
+        
+        if (tab) {
+            console.log(`[novelSlice] Matched tab '${cleanFilePath}' for content sync.`);
+            tab.content = newContent;
+            tab.originalContent = newContent; // 更新原始记录，因为这是最新的权威版本
+            tab.suggestedContent = null;
+            tab.isDirty = false;
+            tab.viewMode = 'edit';
+            console.log(`[novelSlice] Tab '${filePath}' content synced and view mode reset.`);
+        }
     },
   },
   extraReducers: (builder) => {
@@ -82,8 +182,18 @@ const novelSlice = createSlice({
       })
       .addCase(createNovelFile.fulfilled, (state, action) => {
         state.status = 'succeeded';
-        state.currentFile = action.payload.newFilePath;
-        state.novelContent = ''; // 新文件创建后，内容应为空
+        const newFilePath = action.payload.newFilePath;
+        const newTab = {
+          id: newFilePath,
+          title: newFilePath.replace(/^novel\//, '').replace(/\.txt$/, ''),
+          content: '',
+          originalContent: null,
+          suggestedContent: null,
+          isDirty: false,
+          viewMode: 'edit',
+        };
+        state.openTabs.push(newTab);
+        state.activeTabId = newFilePath;
       })
       .addCase(createNovelFile.rejected, (state, action) => {
         state.status = 'failed';
@@ -94,18 +204,66 @@ const novelSlice = createSlice({
       })
       .addCase(updateNovelTitle.fulfilled, (state, action) => {
         state.status = 'succeeded';
-        state.currentFile = action.payload.newFilePath; // 更新当前文件路径为新路径
-        // 还需要更新 chapters 列表中的文件路径
+        const { oldFilePath } = action.meta.arg;
+        const { newFilePath } = action.payload;
+
+        // 更新 tab
+        const tab = state.openTabs.find(t => t.id === oldFilePath);
+        if (tab) {
+          tab.id = newFilePath;
+          tab.title = newFilePath.replace(/^novel\//, '').replace(/\.txt$/, '');
+        }
+
+        // 如果是当前激活的 tab，也更新 activeTabId
+        if (state.activeTabId === oldFilePath) {
+          state.activeTabId = newFilePath;
+        }
+
+        // 更新 chapters 列表
         state.chapters = state.chapters.map(chapter =>
-          chapter === action.meta.arg.oldFilePath ? action.payload.newFilePath : chapter
+          chapter === oldFilePath ? newFilePath : chapter
         );
       })
       .addCase(updateNovelTitle.rejected, (state, action) => {
         state.status = 'failed';
         state.error = action.payload;
-      });
+      })
+      .addCase(openTab.fulfilled, (state, action) => {
+        if (action.payload.isExisting) {
+          state.status = 'succeeded';
+          return;
+        }
+        
+        const { filePath, content } = action.payload;
+        const newTab = {
+          id: filePath,
+          title: filePath.replace(/^novel\//, '').replace(/\.txt$/, ''),
+          content: content,
+          originalContent: null, // This should be the content from disk
+          suggestedContent: null,
+          isDirty: false,
+          viewMode: 'edit',
+        };
+        state.openTabs.push(newTab);
+        state.activeTabId = filePath;
+        state.status = 'succeeded';
+      })
+      .addCase(openTab.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload;
+      })
   },
 });
 
-export const { setNovelContent, setCurrentFile, setChapters, triggerChapterRefresh } = novelSlice.actions;
+export const {
+  setActiveTab,
+  closeTab,
+  updateTabContent,
+  startDiff,
+  acceptSuggestion,
+  rejectSuggestion,
+  setChapters,
+  triggerChapterRefresh,
+  syncFileContent, // 导出新 action
+} = novelSlice.actions;
 export default novelSlice.reducer;

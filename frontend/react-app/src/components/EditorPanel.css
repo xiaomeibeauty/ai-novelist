@@ -56,6 +56,35 @@
     background-color: var(--primary-color-dark);
 }
 
+.editor-container {
+  display: flex;
+  flex-direction: row;
+  flex-grow: 1;
+  overflow: hidden; /* 确保子元素滚动 */
+}
+
+.line-numbers-gutter {
+  width: 40px;
+  min-width: 40px;
+  background-color: var(--panel-bg-color-alt);
+  color: var(--text-color-light);
+  padding: 10px 5px;
+  box-sizing: border-box;
+  text-align: right;
+  font-family: monospace;
+  font-size: 0.9em;
+  user-select: none;
+  overflow: hidden; /* 隐藏自身的滚动条 */
+  position: relative; /* 为了定位子元素 */
+  border-right: 1px solid var(--border-color);
+}
+
+.line-number {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  text-align: right;
+}
 .tiptap-editor {
     flex-grow: 1; /* 让编辑器占据剩余空间 */
     border: 1px solid var(--border-color); /* 添加边框 */
@@ -68,6 +97,10 @@
 .ProseMirror:focus {
     outline: none;
     box-shadow: none;
+}
+/* 修复 Tiptap 段落间距问题 */
+.ProseMirror p {
+  margin: 0;
 }
 
 /* 右键菜单样式 */
@@ -133,4 +166,11 @@
     background-color: #4a4f5b; /* 悬停背景色 */
     border-color: var(--primary-color); /* 悬停时边框变为绿色 */
     color: var(--primary-color); /* 悬停时文字变为绿色 */
+}
+
+/* 为 DiffViewer 添加一个包装器样式，以确保其正确填充空间 */
+.diff-view-wrapper {
+  display: flex; /* 确保子元素可以正确应用 flex 属性 */
+  flex-grow: 1;  /* 占据父容器的剩余空间 */
+  overflow: hidden; /* 防止自身溢出，让内部的 DiffViewer 处理滚动 */
 }

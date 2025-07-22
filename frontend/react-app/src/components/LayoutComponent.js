@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import TabBar from './TabBar'; // 引入 TabBar
 
 function LayoutComponent({ chapterPanel, editorPanel, chatPanel }) {
   // 保持 leftPanelSize 和 rightPanelSize 作为初始尺寸，也可以作为拖动后的尺寸
@@ -33,8 +34,9 @@ function LayoutComponent({ chapterPanel, editorPanel, chatPanel }) {
         minSize={0}
         maxSize={100}
         className="middle-panel"
-        style={{ overflow: 'hidden' }}
+        style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
+        <TabBar />
         {editorPanel}
       </Panel>
       <PanelResizeHandle className="resize-handle" />

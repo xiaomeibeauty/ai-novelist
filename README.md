@@ -12,6 +12,9 @@ AI小说家 是一个基于 Electron 框架构建的桌面应用程序，旨在�
 *   **章节管理**: 用户/AI直观地创建、编辑、删除和组织小说的章节，清晰呈现作品结构。
 *   **内容编辑器**: 提供基础的文本编辑界面，支持小说内容的撰写和修改。
 *   **本地数据存储**: 小说内容安全地存储在本地文件系统，确保数据隐私和离线可用性。
+*   **差异编辑**: 引入差异算法，直观地展示和管理文本的修改。
+*   **多标签页**: 支持多标签页功能，方便在不同章节和文档间切换。
+*   **回溯功能**: 提供版本控制能力，可以轻松回溯到之前的某个版本。
 
 ## 技术栈
 
@@ -76,105 +79,15 @@ graph TD
     ```
 
 ### 运行应用
-
-1.  **启动前端开发服务器 (可选，仅开发时使用)**:
-    在 `ai-novel/frontend/react-app/` 目录下执行：
+ **启动 Electron 应用**:
+    项目根目录 (`ai-novel/`) 执行：
     ```bash
-    npm start
+    npm run start:full .
     ```
-    这将启动一个开发服务器，通常在 `http://localhost:3000`。
 
-2.  **启动 Electron 应用**:
-    然后回到项目根目录 (`ai-novel/`) 并执行：
-    ```bash
-    npm start # 或者 electron .
-    ```
-    这将启动桌面应用程序。
+ **配置 API Key**:
+    应用启动后，您需要在应用的设置界面中输入您的 API Key。此API Key将通过 `electron-store` 进行安全存储。
 
-3.  **配置 DeepSeek API Key**:
-    应用启动后，您需要在应用的设置界面中输入您的 DeepSeek API Key。此API Key将通过 `electron-store` 进行安全存储。
-
-## 项目结构
-
-```
-ai-novel/
-├── .gitignore                # Git 忽略文件配置
-├── CONTRIBUTING_en.md        # 英文贡献指南
-├── CONTRIBUTING.md           # 贡献指南
-├── DeepSeek_API_说明.md      # DeepSeek API 说明
-├── LICENSE                   # 项目许可证 (MIT 协议)
-├── main.js                   # Electron 主进程入口文件
-├── package-lock.json         # npm 锁定文件，记录依赖版本
-├── package.json              # 项目主依赖配置 (Electron, 后端依赖等)
-├── README_en.md              # 英文版 README
-├── README.md                 # 本项目 README (您现在正在阅读的文件)
-├── request.json              # 请求示例文件
-├── Troubleshooting_Focus_Issues.md # 焦点问题排查
-├── Troubleshooting_Left_Panel_Layout.md # 左侧面板布局问题排查
-├── Troubleshooting_Rename_Input_Bug.md # 重命名输入框bug排查
-├── backend/                  # 后端服务代码，处理AI交互、文件操作等
-│   ├── engine/               # 核心引擎逻辑
-│   │   ├── api/              # AI API 接口 (deepseek.js)
-│   │   ├── ipc/              # IPC 通信处理器 (handlers.js)
-│   │   ├── models/           # 模型管理
-│   │   │   ├── adapters/     # 模型适配器
-│   │   │   │   ├── baseAdapter.js  # 基础适配器
-│   │   │   │   ├── deepseekAdapter.js # DeepSeek适配器
-│   │   │   │   └── ollamaAdapter.js # Ollama适配器
-│   │   │   ├── modelProvider.js # 模型提供者
-│   │   │   └── modelRegistry.js # 模型注册
-│   │   └── index.js          # 后端引擎入口
-│   ├── mcp-service.js        # MCP 服务
-│   ├── service-registry.js   # 服务注册
-│   ├── state-manager.js      # 状态管理
-│   ├── tool-service/         # 工具服务定义与执行
-│   │   ├── tools/            # 具体工具实现 (definitions.js, executor.js)
-│   │   └── index.js          # 工具服务入口
-│   └── utils/                # 工具函数
-│       ├── file-tree-builder.js # 文件树构建
-│       └── logger.js         # 日志工具
-├── frontend/                 # 前端应用代码
-│   └── react-app/            # React 前端应用
-│       ├── .gitignore
-│       ├── Frontend_Refactoring_Plan.md # 前端重构计划
-│       ├── package.json      # 前端依赖配置
-│       ├── README.md         # 前端项目的 README
-│       ├── public/           # 静态资源
-│       │   ├── favicon.ico
-│       │   ├── index.html
-│       │   └── preload.js
-│       ├── src/              # React 源代码
-│       │   ├── App.css
-│       │   ├── App.js
-│       │   ├── index.css
-│       │   ├── index.js
-│       │   ├── components/   # UI 组件
-│       │   │   ├── ChapterTreePanel.css
-│       │   │   ├── ChapterTreePanel.js
-│       │   │   ├── ChatHistoryPanel.css
-│       │   │   ├── ChatHistoryPanel.js
-│       │   │   ├── ChatPanel.css
-│       │   │   ├── ChatPanel.js
-│       │   │   ├── CombinedIcon.css
-│       │   │   ├── CombinedIcon.js
-│       │   │   ├── ConfirmationModal.js # 确认模态框
-│       │   │   ├── ContextMenu.css
-│       │   │   ├── ContextMenu.js
-│       │   │   ├── EditorPanel.css
-│       │   │   ├── EditorPanel.js
-│       │   │   ├── LayoutComponent.js
-│       │   │   ├── NotificationModal.css # 通知模态框样式
-│       │   │   └── NotificationModal.js # 通知模态框
-│       │   ├── hooks/        # 自定义 Hook (useIpcRenderer.js)
-│       │   ├── ipc/          # IPC 通信
-│       │   │   └── mainIpcHandler.js # 主进程IPC处理
-│       │   └── store/        # Redux 状态管理
-│       │       ├── slices/   # Redux 切片 (chatSlice.js, novelSlice.js)
-│       │       └── index.js  # store 配置
-├── images/                   # 图片资源
-│   └── 示例图片.jpg          # 示例图片
-└── novel/                    # 存储小说内容的目录 (运行时自动创建)
-```
 
 ## 贡献规则
 - 所有代码提交必须包含 `Signed-off-by` 行（符合 [DCO](https://developercertificate.org/)）。
@@ -191,10 +104,17 @@ ai-novel/
 **未来发展与版权管理**:
 本项目旨在成为一个活跃的开源项目。我们鼓励所有形式的贡献，并致力于确保项目在 MIT 许可框架下的合法合规性。目前，所有贡献均视为按 MIT 许可证授权。然而，为了应对未来可能出现的商业化需求或更严格的知识产权管理，项目可能会考虑引入 **CLA (贡献者许可协议)**，以彻底规避潜在的法律风险。届时，我们将在 `CONTRIBUTING.md` 中提供详细的 CLA 政策和签署流程。
 
-## 下一版本发展目标
 
-1.  **AI 模型集成与优化**: 在现有统一集成框架基础上，持续支持更多主流AI模型，并致力于解决Ollama本地模型适配性问题，提升本地部署的可用性与稳定性。
-2.  **交互体验升级**:
-    *   引入差异算法，回溯功能等，提升内容编辑与版本控制能力。
-    *   支持多标签页功能、全面升级大模型的工具调用能力，初步实现类似Cursor IDE的智能代码/文本交互体验。
-3.  **稳定性与性能提升**: 持续解决当前版本存在的各类Bug，优化应用性能，提高整体稳定性和用户体验。
+---
+
+## 致谢 (Acknowledgements)
+
+本项目的开发在很大程度上借鉴了 `roo-code` 项目。我们对 `roo-code` 的开发者们表示衷心的感谢。
+
+`roo-code` 项目基于 Apache License 2.0 开源。根据其许可证要求，我们在项目中包含了其原始的许可证声明，您可以在 [`LICENSE-roo-code.txt`](./LICENSE-roo-code.txt) 文件中查看。
+
+## Acknowledgements
+
+This project is heavily inspired by and based on the work of the `roo-code` project. We extend our sincere gratitude to the developers of `roo-code`.
+
+The `roo-code` project is licensed under the Apache License, Version 2.0. In compliance with its terms, we have included the original license notice within our project, which can be found in the [`LICENSE-roo-code.txt`](./LICENSE-roo-code.txt) file.

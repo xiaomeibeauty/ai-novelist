@@ -7,69 +7,112 @@ import {
   setIsHistoryPanelVisible,
   setIsDeleteMode,
   setDeepSeekHistory,
-  setToolSuggestions,
-  setToolStatus,
-  clearToolSuggestions,
   setSelectedModel,
   setShowSettingsModal,
   setDeepseekApiKey,
+  setOpenaiApiKey, // 新增
+  setOpenrouterApiKey,
   setAvailableModels,
   setCustomSystemPrompt, // 新增
   resetCustomSystemPrompt, // 新增
+  setEnableStream, // 新增
+  approveToolCalls,
+  rejectToolCalls,
 } from '../store/slices/chatSlice';
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
+import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
 import useIpcRenderer from '../hooks/useIpcRenderer';
+import { restoreCheckpoint } from '../ipc/checkpointIpcHandler';
 import ChatHistoryPanel from './ChatHistoryPanel';
 import NotificationModal from './NotificationModal';
 import ConfirmationModal from './ConfirmationModal';
 import './ChatPanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faClock, faTrashCan, faPaperPlane, faGear } from '@fortawesome/free-solid-svg-icons';
+import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive } from '@fortawesome/free-solid-svg-icons';
+import CustomProviderSettings from './CustomProviderSettings'; // 新增
+
+// 辅助函数：根据 insert_content 参数生成预览文本
+const getInsertContentPreview = (currentContent, { paragraph, content: textToInsert }) => {
+  if (typeof currentContent !== 'string' || typeof textToInsert !== 'string') return null;
+
+  const lines = currentContent.split('\n');
+  const paraIndex = parseInt(paragraph, 10);
+
+  // paragraph 0 或无效值表示在末尾追加
+  if (isNaN(paraIndex) || paraIndex <= 0) {
+    lines.push(textToInsert);
+  } else {
+    // paragraph 是 1-based，数组索引是 0-based
+    const insertAtIndex = Math.min(paraIndex - 1, lines.length);
+    lines.splice(insertAtIndex, 0, textToInsert);
+  }
+
+  return lines.join('\n');
+};
 
 const ChatPanel = memo(() => {
   const dispatch = useDispatch();
-  const messages = useSelector((state) => state.chat.messages);
-  const toolSuggestions = useSelector((state) => state.chat.toolSuggestions);
-  const questionCard = useSelector((state) => state.chat.questionCard);
-  const isHistoryPanelVisible = useSelector((state) => state.chat.isHistoryPanelVisible);
-  const isDeleteMode = useSelector((state) => state.chat.isDeleteMode);
-  const deepSeekChatHistory = useSelector((state) => state.chat.deepSeekHistory);
-  const showSettingsModal = useSelector((state) => state.chat.showSettingsModal);
-  const deepseekApiKey = useSelector((state) => state.chat.deepseekApiKey);
-  const selectedModel = useSelector((state) => state.chat.selectedModel);
-  const availableModels = useSelector((state) => state.chat.availableModels);
-  const customSystemPrompt = useSelector((state) => state.chat.customSystemPrompt); // 新增
+  // 从 chat slice 获取状态
+  const {
+    messages,
+    pendingToolCalls,
+    toolCallState,
+    questionCard,
+    isHistoryPanelVisible,
+    isDeleteMode,
+    deepSeekHistory,
+    showSettingsModal,
+    deepseekApiKey,
+    openaiApiKey,
+    openrouterApiKey,
+    selectedModel,
+    availableModels,
+    customSystemPrompt,
+    enableStream
+  } = useSelector((state) => state.chat);
 
-  const chatDisplayRef = useRef(null);
+  // 从 novel slice 获取状态
+  const { openTabs, activeTabId } = useSelector((state) => state.novel);
+  const activeTab = activeTabId ? openTabs.find(tab => tab.id === activeTabId) : null;
+ 
+   const chatDisplayRef = useRef(null);
   const currentSessionIdRef = useRef(null);
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState('');
   const [onConfirmCallback, setOnConfirmCallback] = useState(null);
   const [onCancelCallback, setOnCancelCallback] = useState(null);
-  const [selectedProvider, setSelectedProvider] = useState('deepseek'); // 新增状态，默认选择 DeepSeek
+  const [selectedProvider, setSelectedProvider] = useState('deepseek'); // 默认选择 DeepSeek
+  const [notification, setNotification] = useState({ show: false, message: '' });
 
-  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels } = useIpcRenderer();
+  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send } = useIpcRenderer();
   // 将 loadSettings 定义为 useCallback，确保其稳定性
   const loadSettings = useCallback(async () => {
     try {
-      const storedApiKey = await getStoreValue('deepseekApiKey');
-      if (storedApiKey) {
-        dispatch(setDeepseekApiKey(storedApiKey));
-        console.log(`加载到的 API Key: ${storedApiKey}`);
+      // 加载 DeepSeek API Key
+      const storedDeepseekApiKey = await getStoreValue('deepseekApiKey');
+      if (storedDeepseekApiKey) {
+        dispatch(setDeepseekApiKey(storedDeepseekApiKey));
+        console.log(`加载到的 DeepSeek API Key: ${storedDeepseekApiKey}`);
+      }
+
+      // 加载 OpenAI API Key
+      const storedOpenaiApiKey = await getStoreValue('openaiApiKey');
+      if (storedOpenaiApiKey) {
+        dispatch(setOpenaiApiKey(storedOpenaiApiKey));
+        console.log(`加载到的 OpenAI API Key: ${storedOpenaiApiKey}`);
+      }
+      // 加载 OpenRouter API Key
+      const storedOpenrouterApiKey = await getStoreValue('openrouterApiKey');
+      if (storedOpenrouterApiKey) {
+        dispatch(setOpenrouterApiKey(storedOpenrouterApiKey));
+        console.log(`加载到的 OpenRouter API Key: ${storedOpenrouterApiKey}`);
       }
       const storedModel = await getStoreValue('defaultAiModel');
       if (storedModel) {
         dispatch(setSelectedModel(storedModel));
-        // 根据模型 ID 判断提供商
-        if (storedModel.startsWith('deepseek')) {
-          setSelectedProvider('deepseek');
-        } else {
-          setSelectedProvider('ollama');
-        }
         console.log(`加载到的模型: ${storedModel}`);
       } else {
         dispatch(setSelectedModel('deepseek-chat')); // 默认模型
-        setSelectedProvider('deepseek'); // 默认提供商
         console.log('未加载到模型，使用默认模型: deepseek-chat');
       }
 
@@ -84,18 +127,42 @@ const ChatPanel = memo(() => {
       }
 
       // 获取并设置可用模型列表
+      console.log('loadSettings: 开始调用 listAllModels...');
       const modelsResult = await listAllModels();
+      console.log('loadSettings: listAllModels 调用完成，结果:', modelsResult.success, modelsResult.models ? modelsResult.models.length : 'N/A');
       if (modelsResult.success) {
           dispatch(setAvailableModels(modelsResult.models));
+          console.log('loadSettings: availableModels 已 dispatch，Redux 状态更新。');
           console.log('可用模型列表已加载:', modelsResult.models.map(m => m.id));
+
+          // 确保 selectedProvider 与当前选中的模型匹配
+          const currentSelectedModel = storedModel || 'deepseek-chat';
+          const matchedModel = modelsResult.models.find(m => m.id === currentSelectedModel);
+          if (matchedModel) {
+              setSelectedProvider(matchedModel.provider);
+              console.log(`loadSettings: 根据选中模型 '${currentSelectedModel}'，设置 selectedProvider 为 '${matchedModel.provider}'`);
+          } else {
+              // 如果当前选中模型不在可用列表中，则重置为默认提供商
+              setSelectedProvider('deepseek');
+              console.warn(`loadSettings: 选中模型 '${currentSelectedModel}' 不在可用模型列表中，重置 selectedProvider 为 'deepseek'`);
+          }
       } else {
-          console.error('获取可用模型列表失败:', modelsResult.error);
+          console.error('loadSettings: 获取可用模型列表失败:', modelsResult.error);
       }
+
+      // 加载流式传输设置并同步到后端
+      const storedEnableStream = await getStoreValue('enableStream');
+      const streamEnabled = storedEnableStream !== false; // 默认为 true
+      dispatch(setEnableStream(streamEnabled));
+      send('set-streaming-mode', { stream: streamEnabled }); // **新增**: 将设置同步到后端
+      console.log(`加载到的流式传输设置: ${streamEnabled}，并已同步到后端。`);
+
+      console.log('loadSettings: 结束加载设置。');
 
     } catch (error) {
       console.error('加载设置失败:', error);
     }
- }, [dispatch, getStoreValue, setDeepseekApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider, setCustomSystemPrompt]); // 更新依赖，添加 setCustomSystemPrompt
+  }, [dispatch, getStoreValue, setDeepseekApiKey, setOpenaiApiKey, setOpenrouterApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider, setCustomSystemPrompt]); // 更新依赖
 
   const handleSendMessage = useCallback(async (messageText) => { // 将 command 改名为 messageText
     if (!messageText.trim()) return;
@@ -115,29 +182,65 @@ const ChatPanel = memo(() => {
     };
     dispatch(appendMessage(newUserMessage)); // 追加用户消息
 
-    dispatch(clearToolSuggestions()); // 清除工具建议
+    // 如果启用了流式传输，立即添加一个 AI 消息占位符
+    if (enableStream) {
+      dispatch(appendMessage({
+        sender: 'AI',
+        text: '',
+        role: 'assistant',
+        content: '',
+        className: 'ai',
+        sessionId: currentSessionId,
+        isLoading: true, // 添加 isLoading 状态
+      }));
+    }
+
+    // dispatch(clearToolSuggestions()); // This is now handled by the new tool call flow
     dispatch(setQuestionCard(null)); // 清除提问卡片
 
     try {
       // 3. 将包含新消息和历史消息的完整数组作为上下文传递给后端
       // 这里的 messages 已经是 Redux state，不需要再手动构建 messagesToSend
-      await invoke('process-command', { message: messageText, sessionId: currentSessionId, currentMessages: messages }); // 调整为 invoke 的 payload 格式
+      // **关键修复**: 移除多余的 stream 参数，因为后端现在通过 'set-streaming-mode' 事件管理状态
+      await invoke('process-command', { message: messageText, sessionId: currentSessionId, currentMessages: messages });
     } catch (error) {
       console.error('Error sending message to AI:', error);
       dispatch(appendMessage({ sender: 'System', text: `发送消息失败: ${error.message}`, role: 'system', content: `发送消息失败: ${error.message}`, className: 'system-error' }));
     }
   }, [dispatch, invoke, messages]); // 依赖中添加 dispatch, invoke, messages
 
-  const handleToolAction = useCallback(async (toolCallId, actionType) => { // 调整参数名为 actionType
-    dispatch(setToolStatus({ toolCallId, status: 'pending', message: actionType === 'approve' ? '正在执行...' : '已拒绝' })); // 更新工具状态
-    try {
-      await invoke('process-tool-action', { toolCallId, actionType }); // 调整为 invoke 的 payload 格式
-      dispatch(setToolStatus({ toolCallId, status: actionType === 'approve' ? 'executed' : 'rejected', message: actionType === 'approve' ? '执行完毕' : '已拒绝' }));
-    } catch (error) {
-      console.error('Error executing tool action:', error);
-      dispatch(setToolStatus({ toolCallId, status: 'failed', message: `执行失败: ${error.message}` }));
+  // New handler for approving/rejecting all pending tool calls
+  const handleToolApproval = useCallback(async (action) => {
+    if (toolCallState !== 'pending_user_action' || !pendingToolCalls || pendingToolCalls.length === 0) {
+      return;
     }
-  }, [dispatch, invoke]); // 依赖中添加 dispatch, invoke
+
+    const isFileModification = pendingToolCalls.some(call => call.tool_name === 'write_to_file' || call.tool_name === 'apply_diff');
+
+    // Dispatch action to update state immediately
+    if (action === 'approve') {
+      // 移除对 acceptSuggestion 的前端调用。UI 更新将由后端的 'file-content-updated' 事件驱动。
+      dispatch(approveToolCalls());
+    } else {
+      dispatch(rejectToolCalls());
+      if (isFileModification && activeTabId) {
+        dispatch(rejectSuggestion(activeTabId));
+      }
+    }
+
+    // Send IPC message to the backend
+    try {
+      // The backend now expects 'approve' or 'reject' for the entire batch
+      await invoke('process-tool-action', {
+        actionType: action,
+        toolCalls: pendingToolCalls,
+      });
+    } catch (error) {
+      console.error('Error processing tool action:', error);
+      // Optionally dispatch an error message to the UI
+      dispatch(appendMessage({ sender: 'System', text: `工具操作失败: ${error.message}`, role: 'system', className: 'system-error' }));
+    }
+  }, [dispatch, invoke, pendingToolCalls, toolCallState, activeTabId]);
 
   const handleProviderChange = useCallback((event) => {
     const newProvider = event.target.value;
@@ -159,40 +262,30 @@ const ChatPanel = memo(() => {
 
   const handleSaveSettings = useCallback(async () => { // 将 handleSaveSettings 封装为 useCallback
     try {
-      console.log(`准备保存 API Key: ${deepseekApiKey}`);
+      console.log(`准备保存 DeepSeek API Key: ${deepseekApiKey}`);
       await setStoreValue('deepseekApiKey', deepseekApiKey);
+      console.log(`准备保存 OpenAI API Key: ${openaiApiKey}`);
+      await setStoreValue('openaiApiKey', openaiApiKey); // 保存 OpenAI API Key
+      console.log(`准备保存 OpenRouter API Key: ${openrouterApiKey}`);
+      await setStoreValue('openrouterApiKey', openrouterApiKey);
       console.log(`准备保存模型: ${selectedModel}`);
       await setStoreValue('defaultAiModel', selectedModel);
       console.log(`准备保存自定义系统提示词: ${customSystemPrompt.substring(0, 50)}...`);
       await setStoreValue('customSystemPrompt', customSystemPrompt); // 保存自定义提示词
+      await setStoreValue('enableStream', enableStream); // 保存流式传输设置
+      send('set-streaming-mode', { stream: enableStream }); // **新增**: 保存时也同步到后端
       dispatch(setShowSettingsModal(false));
       console.log('设置已保存！');
     } catch (error) {
       console.error('保存设置失败:', error);
     }
-  }, [deepseekApiKey, selectedModel, customSystemPrompt, setStoreValue, dispatch]); // 依赖中添加 customSystemPrompt
+ }, [deepseekApiKey, openaiApiKey, openrouterApiKey, selectedModel, customSystemPrompt, enableStream, setStoreValue, dispatch]); // 依赖中添加 enableStream
 
-  const handleCancelSettings = useCallback(() => { // 简化 handleCancelSettings
+ const handleCancelSettings = useCallback(() => { // 简化 handleCancelSettings
     dispatch(setShowSettingsModal(false));
     loadSettings(); // 重新加载以恢复未保存的更改
   }, [dispatch, loadSettings]); // 依赖中添加 dispatch, loadSettings
 
-  const handleBatchAction = useCallback(async (actionType) => { // 将 handleBatchAction 封装为 useCallback
-    // ... 批量操作逻辑保持不变
-    if (actionType === 'approve_all') {
-      for (const tool of toolSuggestions) {
-        if (!tool.statusClass || (tool.statusClass !== 'executed' && tool.statusClass !== 'failed' && tool.statusClass !== 'rejected')) {
-          await handleToolAction(tool.toolCallId, 'approve');
-        }
-      }
-    } else if (actionType === 'reject_all') {
-      for (const tool of toolSuggestions) {
-        if (!tool.statusClass || (tool.statusClass !== 'executed' && tool.statusClass !== 'failed' && tool.statusClass !== 'rejected')) {
-          await handleToolAction(tool.toolCallId, 'reject');
-        }
-      }
-    }
-  }, [toolSuggestions, handleToolAction]); // 依赖中添加 toolSuggestions, handleToolAction
 
   const handleUserQuestionResponse = useCallback(async (response, toolCallId) => { // 将 handleUserQuestionResponse 封装为 useCallback
     dispatch(setQuestionCard(null));
@@ -206,7 +299,7 @@ const ChatPanel = memo(() => {
 
   const handleResetChat = useCallback(async () => { // 将 handleResetChat 封装为 useCallback
     dispatch(setMessages([])); // 清除聊天消息
-    dispatch(clearToolSuggestions()); // 清除工具建议
+    // dispatch(clearToolSuggestions()); // This is now handled by the new tool call flow
     dispatch(setQuestionCard(null)); // 清除提问卡片
     currentSessionIdRef.current = null; // 重置 sessionId
 
@@ -228,7 +321,7 @@ const ChatPanel = memo(() => {
 
   const handleSelectConversation = useCallback(async (sessionId) => { // 调整参数为 sessionId，并封装为 useCallback
     try {
-      const conversation = deepSeekChatHistory.find(conv => conv.sessionId === sessionId);
+      const conversation = deepSeekHistory.find(conv => conv.sessionId === sessionId);
       if (conversation) {
         dispatch(setMessages(conversation.messages));
         currentSessionIdRef.current = sessionId;
@@ -237,7 +330,7 @@ const ChatPanel = memo(() => {
     } catch (error) {
       console.error('Error selecting conversation:', error);
     }
-  }, [dispatch, deepSeekChatHistory]); // 依赖中添加 dispatch, deepSeekChatHistory
+  }, [dispatch, deepSeekHistory]);
 
   const handleDeleteConversation = useCallback(async (sessionId) => { // 将 handleDeleteConversation 封装为 useCallback
     setConfirmationMessage('确定要删除此对话吗？');
@@ -245,7 +338,7 @@ const ChatPanel = memo(() => {
       setShowConfirmationModal(false); // 关闭确认弹窗
       try {
         await deleteDeepSeekChatHistory(sessionId);
-        loadDeepSeekChatHistory(); // 重新加载历史记录
+        loadDeepSeekChatHistory();
       } catch (error) {
         console.error('Error deleting conversation:', error);
       }
@@ -254,20 +347,81 @@ const ChatPanel = memo(() => {
       setShowConfirmationModal(false); // 关闭确认弹窗
     });
     setShowConfirmationModal(true); // 显示确认弹窗
-  }, [deleteDeepSeekChatHistory, loadDeepSeekChatHistory]); // 依赖中添加 deleteDeepSeekChatHistory, loadDeepSeekChatHistory
+  }, [deleteDeepSeekChatHistory, loadDeepSeekChatHistory]);
+
+  // 应用启动时加载一次设置
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]); // loadSettings 已经是 useCallback，依赖稳定
 
   useEffect(() => {
     if (isHistoryPanelVisible) {
       loadDeepSeekChatHistory();
     }
-  }, [isHistoryPanelVisible, loadDeepSeekChatHistory]); // 依赖中添加 loadDeepSeekChatHistory，移除 dispatch
+  }, [isHistoryPanelVisible, loadDeepSeekChatHistory]);
+ 
+   // 新增: 当收到文件修改工具调用时，自动触发 diff 视图
+   useEffect(() => {
+    console.log('[DEBUG] Diff trigger effect running. State:', { toolCallState, pendingToolCalls: pendingToolCalls?.length, activeTabId });
+
+  if (toolCallState === 'pending_user_action' && pendingToolCalls?.length > 0 && activeTabId) {
+    // 增强日志：打印出完整的 pendingToolCalls 结构以供调试
+    console.log('[DEBUG] pendingToolCalls content:', JSON.stringify(pendingToolCalls, null, 2));
+
+    const fileModificationCall = pendingToolCalls.find(
+      call => call.toolName === 'write_to_file' || call.toolName === 'apply_diff' || call.toolName === 'insert_content'
+    );
+
+    console.log('[DEBUG] Found file modification call (using toolName):', fileModificationCall);
+
+      if (fileModificationCall) {
+        const targetPath = fileModificationCall.toolArgs.path; // 从解析后的 toolArgs 获取路径
+        console.log(`[DEBUG] Target path: ${targetPath}, Active tab ID: ${activeTabId}`);
+
+        // 确保工具要修改的文件就是当前激活的 tab
+        if (targetPath && activeTab && activeTab.id.endsWith(targetPath)) {
+          let suggestedContent = null;
+          
+          if (fileModificationCall.toolName === 'write_to_file') {
+            suggestedContent = fileModificationCall.toolArgs.content;
+            console.log('[DEBUG] Tool is write_to_file, using provided content.');
+          } else if (fileModificationCall.toolName === 'insert_content') {
+            console.log('[DEBUG] Tool is insert_content, generating preview...');
+            suggestedContent = getInsertContentPreview(activeTab.content, fileModificationCall.toolArgs);
+          } else {
+             // 兼容 apply_diff 等其他可能的情况
+            suggestedContent = fileModificationCall.toolArgs.suggestedContentPreview;
+            console.log('[DEBUG] Tool is other, using suggestedContentPreview.');
+          }
+
+          console.log('[DEBUG] Generated suggested content:', suggestedContent ? `${suggestedContent.substring(0, 50)}...` : 'null');
+
+          if (typeof suggestedContent === 'string') {
+            console.log('[DEBUG] Dispatching startDiff action.');
+            dispatch(startDiff({ tabId: activeTabId, suggestion: suggestedContent }));
+          } else {
+            console.warn('无法触发差异视图：建议内容 (suggestedContent) 未生成、未提供或格式不正确。');
+          }
+        } else {
+          console.warn(`[DEBUG] Mismatch between target path (${targetPath}) and active tab (${activeTabId}). Diff view not triggered.`);
+        }
+      }
+    }
+   }, [pendingToolCalls, toolCallState, activeTab, dispatch]);
+
+  // 新增 useEffect：在设置模态框显示时加载设置
+  useEffect(() => {
+    if (showSettingsModal) {
+      loadSettings();
+    }
+  }, [showSettingsModal, loadSettings]);
 
   // 自动滚动聊天区到底部 (此 useEffect 保留)
   useEffect(() => {
     if (chatDisplayRef.current) {
       chatDisplayRef.current.scrollTop = chatDisplayRef.current.scrollHeight;
     }
-  }, [messages, toolSuggestions, questionCard, isHistoryPanelVisible]);
+  }, [messages, questionCard, isHistoryPanelVisible]);
 
   return (
     <React.Fragment>
@@ -294,10 +448,32 @@ const ChatPanel = memo(() => {
         <div id="chatDisplay" ref={chatDisplayRef}>
           <button className="reset-chat-button" onClick={handleResetChat}>×</button>
           {messages.map((msg, index) => (
-            <div key={index} className={`message ${msg.role === 'user' ? 'user' : msg.role === 'assistant' ? 'ai' : msg.role} ${msg.className || ''}`}>
-              {msg.role === 'tool' ? ( // 系统消息或工具消息
+            <div key={msg.id || index} className={`message ${msg.role === 'user' ? 'user' : msg.role === 'assistant' ? 'ai' : msg.role} ${msg.className || ''}`}>
+              {msg.role === 'tool' && msg.checkpointId ? ( // 这是一个可回溯的存档点消息
+                <div className="checkpoint-message">
+                  <button
+                    className="checkpoint-restore-button"
+                    onClick={async () => {
+                      // 假设 taskId 可以从 sessionId 获得
+                      const taskId = msg.sessionId || currentSessionIdRef.current || 'default-task';
+                      console.log(`Restoring checkpoint ${msg.checkpointId} for task ${taskId}...`);
+                      const result = await restoreCheckpoint(taskId, msg.checkpointId);
+                      if (result.success) {
+                        setNotification({ show: true, message: '文件已成功恢复到指定版本！' });
+                        // 可以选择性地触发文件内容刷新
+                      } else {
+                        setNotification({ show: true, message: `恢复失败: ${result.error}` });
+                      }
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faBoxArchive} />
+                    <span>版本已存档 (点击恢复至此刻)</span>
+                  </button>
+                  <span className="checkpoint-id-display">ID: {msg.checkpointId.substring(0, 7)}</span>
+                </div>
+              ) : msg.role === 'tool' ? ( // 普通系统消息
                 <>
-                  <div className="message-header">系统: {msg.name ? `工具 ${msg.name}` : ''}</div>
+                  <div className="message-header">系统: {msg.name ? `${msg.name}` : ''}</div>
                   <div className="message-content">
                       {msg.text || msg.content}
                   </div>
@@ -311,8 +487,8 @@ const ChatPanel = memo(() => {
                       <pre className="reasoning-content">{msg.reasoning_content}</pre>
                     </details>
                   )}
-                  <div className="message-content">
-                    {msg.content || msg.text || '[消息内容缺失]'}
+                  <div className={`message-content ${msg.toolCalls && msg.toolCalls.length > 0 ? 'is-tool-call' : ''}`}>
+                    {msg.isLoading ? <FontAwesomeIcon icon={faSpinner} spin /> : (msg.content || msg.text || '[消息内容缺失]')}
                   </div>
                 </>
               ) : ( // 用户消息 (msg.role === 'user')
@@ -323,48 +499,41 @@ const ChatPanel = memo(() => {
                   </div>
                 </>
               )}
-              {msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0 && (
-                <div className="tool-calls-placeholder">
-                  （AI 建议执行工具：{msg.tool_calls.map(tc => tc.function.name).join(', ')}，请查看下方工具建议区域）
-                </div>
-              )}
+              {/* The tool call content is now directly streamed into the message content, so this placeholder is no longer needed. */}
             </div>
           ))}
         </div>
 
         {isHistoryPanelVisible && (
           <ChatHistoryPanel
-            history={deepSeekChatHistory}
+            history={deepSeekHistory}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
             isDeleteMode={isDeleteMode}
           />
         )}
 
-        {toolSuggestions.length > 0 && (
-          <div id="batch-tool-suggestions-container">
-            <p>AI 建议执行以下多项操作：请逐一确认或取消。</p>
-            <div className="tool-cards-wrapper">
-              {toolSuggestions.map((tool, index) => (
-                <div key={tool.toolCallId} id={`tool-suggestion-${tool.toolCallId}`} className={`tool-suggestion ${tool.statusClass || ''}`}>
-                  <p>AI: 需要执行 {tool.toolName} 操作。</p>
-                  <details className="tool-params-details">
-                    <summary className="tool-params-summary">参数详情 <span className="collapse-icon"></span></summary>
-                    <pre><code>{JSON.stringify(tool.toolArgs, null, 2)}</code></pre>
-                  </details>
-                  <div className="tool-actions">
-                    <button className="approve-button" onClick={() => handleToolAction(tool.toolCallId, 'approve')} disabled={tool.statusClass && (tool.statusClass === 'executed' || tool.statusClass === 'failed' || tool.statusClass === 'rejected')}>批准执行</button>
-                    <button className="reject-button" onClick={() => handleToolAction(tool.toolCallId, 'reject')} disabled={tool.statusClass && (tool.statusClass === 'executed' || tool.statusClass === 'failed' || tool.statusClass === 'rejected')}>拒绝</button>
-                  </div>
-                  <p className="tool-status-text">状态: {tool.statusMessage || '待处理'}</p>
+        {/* New Tool Action Bar, displayed above the input group */}
+        {toolCallState === 'pending_user_action' && (
+            <div className="tool-action-bar">
+                <span>AI 请求执行工具，请确认操作：</span>
+                <div className="tool-action-buttons">
+                    <button
+                        className="approve-all-button"
+                        onClick={() => handleToolApproval('approve')}
+                        disabled={toolCallState !== 'pending_user_action'}
+                    >
+                        批准
+                    </button>
+                    <button
+                        className="reject-all-button"
+                        onClick={() => handleToolApproval('reject')}
+                        disabled={toolCallState !== 'pending_user_action'}
+                    >
+                        取消
+                    </button>
                 </div>
-              ))}
             </div>
-            <div className="batch-actions">
-              <button className="approve-all-button" onClick={() => handleBatchAction('approve_all')}>批量批准</button>
-              <button className="reject-all-button" onClick={() => handleBatchAction('reject_all')}>批量拒绝</button>
-            </div>
-          </div>
         )}
 
         {questionCard && (
@@ -417,11 +586,17 @@ const ChatPanel = memo(() => {
                value={selectedProvider}
                onChange={handleProviderChange}
              >
-               <option value="deepseek">DeepSeek</option>
-               <option value="ollama">Ollama</option>
+               {/* 从 availableModels 动态生成提供商列表 */}
+               {[...new Set(availableModels.map(model => model.provider))].map(provider => (
+                 <option key={provider} value={provider}>
+                   {/* 将首字母大写以获得更好的显示效果 */}
+                   {provider.charAt(0).toUpperCase() + provider.slice(1)}
+                 </option>
+               ))}
              </select>
            </div>
 
+           {/* 根据 selectedProvider 显示不同的 API Key 输入框 */}
            {selectedProvider === 'deepseek' && (
              <div className="setting-item">
                <label htmlFor="deepseekApiKey">DeepSeek API Key:</label>
@@ -431,6 +606,30 @@ const ChatPanel = memo(() => {
                  value={deepseekApiKey}
                  onChange={(e) => dispatch(setDeepseekApiKey(e.target.value))}
                  placeholder="请输入您的 DeepSeek API Key"
+               />
+             </div>
+           )}
+           {selectedProvider === 'openai' && (
+             <div className="setting-item">
+               <label htmlFor="openaiApiKey">OpenAI API Key:</label>
+               <input
+                 type="text"
+                 id="openaiApiKey"
+                 value={openaiApiKey}
+                 onChange={(e) => dispatch(setOpenaiApiKey(e.target.value))}
+                 placeholder="请输入您的 OpenAI API Key"
+               />
+             </div>
+           )}
+           {selectedProvider === 'openrouter' && (
+             <div className="setting-item">
+               <label htmlFor="openrouterApiKey">OpenRouter API Key:</label>
+               <input
+                 type="text"
+                 id="openrouterApiKey"
+                 value={openrouterApiKey}
+                 onChange={(e) => dispatch(setOpenrouterApiKey(e.target.value))}
+                 placeholder="请输入您的 OpenRouter API Key"
                />
              </div>
            )}
@@ -475,19 +674,44 @@ const ChatPanel = memo(() => {
              </button>
            </div>
 
+           {/* 流式传输开关 */}
+           <div className="setting-item">
+             <label htmlFor="streamToggle">启用流式传输:</label>
+             <label className="switch">
+               <input
+                 type="checkbox"
+                 id="streamToggle"
+                 checked={enableStream}
+                 onChange={(e) => dispatch(setEnableStream(e.target.checked))}
+               />
+               <span className="slider round"></span>
+             </label>
+           </div>
+
            <div className="modal-actions">
              <button onClick={handleSaveSettings} className="save-button">保存</button>
              <button onClick={handleCancelSettings} className="cancel-button">取消</button>
            </div>
+           
+           {/* 新增：自定义提供商设置组件 */}
+           <CustomProviderSettings />
+
          </div>
-        </div>
-      )}
+       </div>
+     )}
 
       {showConfirmationModal && (
         <ConfirmationModal
           message={confirmationMessage}
           onConfirm={onConfirmCallback}
           onCancel={onCancelCallback}
+        />
+      )}
+
+      {notification.show && (
+        <NotificationModal
+          message={notification.message}
+          onClose={() => setNotification({ show: false, message: '' })}
         />
       )}
     </React.Fragment>

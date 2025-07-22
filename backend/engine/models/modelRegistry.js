@@ -24,7 +24,14 @@ class ModelRegistry {
         // 注册此适配器支持的所有模型
         const models = await adapterInstance.listModels(); // 添加 await
         models.forEach(modelInfo => {
-            const modelId = modelInfo.id;
+            let modelId = modelInfo.id;
+            // 为 openrouter 和 ollama 模型ID添加提供商前缀，以确保唯一性
+            if (name === 'openrouter' && !modelId.startsWith('openrouter/')) {
+                modelId = `openrouter/${modelId}`;
+            } else if (name === 'ollama' && !modelId.startsWith('ollama/')) {
+                modelId = `ollama/${modelId}`;
+            }
+
             if (this.modelMapping[modelId] && this.modelMapping[modelId] !== name) {
                 console.warn(`模型 '${modelId}' 已被适配器 '${this.modelMapping[modelId]}' 注册，将被适配器 '${name}' 覆盖。`);
             }
@@ -50,12 +57,30 @@ class ModelRegistry {
      * 列出所有已注册的模型。
      * @returns {Array<Object>} 所有模型的信息列表。
      */
-    async listAllModels() { // 变为 async
+    async listAllModels() {
         let allModels = [];
         for (const adapterName in this.adapters) {
-            // 需要等待每个适配器的 listModels 结果
-            const adapterModels = await this.adapters[adapterName].listModels();
-            allModels = allModels.concat(adapterModels);
+            const adapter = this.adapters[adapterName];
+            const adapterModels = await adapter.listModels();
+
+            const processedModels = adapterModels.map(model => {
+                // 为每个模型添加提供商信息
+                model.provider = adapterName;
+                
+                // 特殊处理ollama,确保id前缀正确
+                if (adapterName === 'ollama' && !model.id.startsWith('ollama/')) {
+                    model.id = `ollama/${model.id}`;
+                }
+                
+                // 在 listAllModels 中也进行同样的处理，以确保返回给前端的 ID 是一致的
+                if (adapterName === 'openrouter' && !model.id.startsWith('openrouter/')) {
+                    model.id = `openrouter/${model.id}`;
+                }
+
+                return model;
+            });
+
+            allModels = allModels.concat(processedModels);
         }
         return allModels;
     }
