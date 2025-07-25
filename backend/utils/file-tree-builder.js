@@ -38,11 +38,11 @@ const readDirectoryRecursive = async (dirPath, baseDirPath) => {
 };
 
 // 获取指定目录的文件树
-const getFileTree = async (targetDir) => {
-    const novelDirPath = path.join(__dirname, '../..', targetDir); // 从 utils 目录向上两级到项目根目录，然后进入 targetDir
+// 获取指定目录的文件树
+const getFileTree = async (absolutePathToDir) => {
     try {
-        await fs.mkdir(novelDirPath, { recursive: true }).catch(() => {}); // 确保目录存在
-        const tree = await readDirectoryRecursive(novelDirPath, novelDirPath);
+        await fs.mkdir(absolutePathToDir, { recursive: true }).catch(() => {}); // 确保目录存在
+        const tree = await readDirectoryRecursive(absolutePathToDir, absolutePathToDir);
         return { success: true, tree };
     } catch (error) {
         console.error(`[file-tree-builder] 获取文件树失败: ${error}`);

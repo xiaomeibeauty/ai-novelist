@@ -1,21 +1,31 @@
 const ipcRenderer = window.ipcRenderer;
 
-export const saveCheckpoint = async (taskId, message) => {
+export const saveArchive = async (taskId, message) => {
   try {
     const result = await ipcRenderer.invoke('checkpoints:save', { taskId, message });
     return result;
   } catch (error) {
-    console.error('Error saving checkpoint:', error);
+    console.error('Error saving archive:', error);
     throw error;
   }
 };
 
-export const restoreCheckpoint = async (taskId, commitHash) => {
+export const restoreNovelArchive = async (taskId, archiveId) => {
   try {
-    const result = await ipcRenderer.invoke('checkpoints:restore', { taskId, commitHash });
+    const result = await ipcRenderer.invoke('checkpoints:restore', { taskId, archiveId });
     return result;
   } catch (error) {
-    console.error('Error restoring checkpoint:', error);
+    console.error('Error restoring archive:', error);
+    throw error;
+  }
+};
+
+export const deleteNovelArchive = async (taskId, archiveId) => {
+  try {
+    const result = await ipcRenderer.invoke('checkpoints:delete', { taskId, archiveId });
+    return result;
+  } catch (error) {
+    console.error('Error deleting archive:', error);
     throw error;
   }
 };

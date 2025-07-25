@@ -1,10 +1,22 @@
-const { ipcMain } = require('electron');
+const { ipcMain, app } = require('electron');
+const isDev = require('electron-is-dev');
 const logger = require('../../utils/logger');
 const { getAiChatHistoryFilePath } = require('../../utils/logger'); // 修改
 const chatService = require('../chatService'); // 引入 chatService
 const { getModelRegistry, initializeModelProvider } = require('../models/modelProvider'); // 修正路径
 let serviceRegistry = null;
 const path = require('path');
+
+// 统一获取 novel 目录路径的辅助函数
+const getNovelPath = () => {
+    if (isDev) {
+        // 开发环境：位于项目根目录
+        return path.join(app.getAppPath(), 'novel');
+    } else {
+        // 生产环境：位于 .exe 文件同级目录
+        return path.join(path.dirname(app.getPath('exe')), 'novel');
+    }
+};
 
 // 新增：清空 DeepSeek 对话历史
 const handleClearAiConversation = async () => { // 修改函数名
@@ -58,7 +70,7 @@ const getCheckpointDirs = async () => {
         const Store = StoreModule.default;
         storeInstance = new Store();
     }
-    const novelDirPath = path.join(__dirname, '../../../novel');
+    const novelDirPath = getNovelPath();
     const userDataPath = storeInstance.get('customStoragePath') || path.join(require('electron').app.getPath('userData'));
     return { workspaceDir: novelDirPath, shadowDir: userDataPath };
 };
@@ -213,7 +225,7 @@ const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
                     const filePathArg = toolToProcess.toolArgs.path; // e.g., '我的第一章.txt' or 'subdir/file.txt'
                     if (filePathArg) {
                         // 构造正确的 novel 目录根路径
-                        const novelRootDir = path.join(__dirname, '../../../novel');
+                        const novelRootDir = getNovelPath();
                         // 构造文件的完整绝对路径
                         const fullPath = path.join(novelRootDir, filePathArg);
                         // 构造前端使用的、带 'novel/' 前缀的相对路径 ID
@@ -435,10 +447,10 @@ const handleSendUserResponse = async (event, userResponse, toolCallId) => {
 
  
 const getChaptersAndUpdateFrontend = async (mainWindow) => {
-    const novelDirPath = path.join(__dirname, '../../../novel');
+    const novelDirPath = getNovelPath();
     try {
         await fs.mkdir(novelDirPath, { recursive: true }).catch(() => {}); // 确保目录存在
-        const fileTreeResult = await getFileTree('novel'); // 使用新的文件树构建函数
+        const fileTreeResult = await getFileTree(getNovelPath()); // 使用新的文件树构建函数
         let chapters = [];
         if (fileTreeResult.success) {
             // 将文件树的 children 数组作为 chapters 返回
@@ -485,7 +497,7 @@ const flattenFileTree = (nodes) => {
 // 新增：处理列出 novel 目录下所有文件请求
 const handleListNovelFiles = async () => {
     try {
-        const fileTreeResult = await getFileTree('novel'); // 获取 novel 目录的文件树
+        const fileTreeResult = await getFileTree(getNovelPath()); // 获取 novel 目录的文件树
         console.log('[handleListNovelFiles] fileTreeResult.tree:', JSON.stringify(fileTreeResult.tree, null, 2)); // 添加日志
 
         if (fileTreeResult.success) {
@@ -509,7 +521,7 @@ const handleGetChapters = async () => {
 
 // 处理加载章节内容请求
 const handleLoadChapterContent = async (event, chapterId) => {
-    const novelDirPath = path.join(__dirname, '../../../novel');
+    const novelDirPath = getNovelPath();
     const chapterFilePath = path.join(novelDirPath, chapterId); // chapterId 已经是相对路径
     console.log(`[handlers.js] handleLoadChapterContent: 尝试加载文件: ${chapterFilePath}`);
     try {
@@ -531,7 +543,7 @@ const handleRegisterRendererListeners = (event) => {
 
 // 处理创建新章节请求
 const handleCreateChapter = async (event, chapterTitle) => { // 这个名字有点歧义，现在主要用于创建文件
-    const novelDirPath = path.join(__dirname, '../../../novel');
+    const novelDirPath = getNovelPath();
     // 确保novel目录存在
     await fs.mkdir(novelDirPath, { recursive: true }).catch(() => {}); // 忽略目录已存在的错误
 
@@ -548,7 +560,7 @@ const handleCreateChapter = async (event, chapterTitle) => { // 这个名字有�
 
 // 新增：处理创建文件夹请求
 const handleCreateFolder = async (event, folderPathInput) => {
-    const novelRootPath = path.join(__dirname, '../../../novel');
+    const novelRootPath = getNovelPath();
     const parentDir = path.dirname(folderPathInput); // 获取父目录
     const folderName = path.basename(folderPathInput); // 获取文件夹名
 
@@ -572,7 +584,14 @@ const handleCreateFolder = async (event, folderPathInput) => {
 
 // 处理创建新小说文件请求
 const handleCreateNovelFile = async (event, { filePath, content = '' }) => { // 实际创建文件 IPC
-    const novelRootPath = path.join(__dirname, '../../../novel');
+    logger.writeLog(`[IPC] handleCreateNovelFile received: filePath=${filePath}, content length=${content?.length || 0}`);
+
+    if (typeof filePath !== 'string' || !filePath) {
+        logger.writeLog(`[ERROR][IPC] handleCreateNovelFile: Invalid or missing filePath.`);
+        return { success: false, error: 'Invalid or missing filePath' };
+    }
+
+    const novelRootPath = getNovelPath();
     // 移除 filePath 开头的 'novel/' 前缀，因为 novelRootPath 已经指向 novel 目录
     const cleanFilePath = filePath.startsWith('novel/') ? filePath.substring(6) : filePath;
     const fullPath = path.join(novelRootPath, cleanFilePath); // 使用清理后的路径
@@ -601,7 +620,7 @@ const handleCreateNovelFile = async (event, { filePath, content = '' }) => { // 
 
 // 处理删除章节请求
 const handleDeleteItem = async (event, itemId) => {
-    const itemPath = path.join(__dirname, '../../../novel', itemId);
+    const itemPath = path.join(getNovelPath(), itemId);
     try {
         const stats = await fs.stat(itemPath);
         if (stats.isDirectory()) {
@@ -621,7 +640,7 @@ const handleDeleteItem = async (event, itemId) => {
 
 // 处理重命名章节请求
 const handleRenameItem = async (event, oldItemId, newItemName) => {
-    const novelRootPath = path.join(__dirname, '../../../novel');
+    const novelRootPath = getNovelPath();
     const oldItemPath = path.join(novelRootPath, oldItemId);
     const parentDir = path.dirname(oldItemPath); // 目标文件夹
 
@@ -666,7 +685,7 @@ const copyRecursive = async (src, dest) => {
 
 // 处理复制项目请求
 const handleCopyItem = async (event, sourceId, targetFolderId) => {
-    const novelRootPath = path.join(__dirname, '../../../novel');
+    const novelRootPath = getNovelPath();
     const sourcePath = path.join(novelRootPath, sourceId);
     
     // 确保 targetFolderId 为空时目标目录是 novel 根目录
@@ -701,7 +720,7 @@ const handleCopyItem = async (event, sourceId, targetFolderId) => {
 
 // 处理移动项目请求 (相当于剪切+粘贴)
 const handleMoveItem = async (event, sourceId, targetFolderId) => {
-    const novelRootPath = path.join(__dirname, '../../../novel');
+    const novelRootPath = getNovelPath();
     const sourcePath = path.join(novelRootPath, sourceId);
     const targetFolderPath = targetFolderId ? path.join(novelRootPath, targetFolderId) : novelRootPath;
 
@@ -734,7 +753,7 @@ const handleMoveItem = async (event, sourceId, targetFolderId) => {
 
 // 处理更新小说文件标题请求
 const handleUpdateNovelTitle = async (event, { oldFilePath, newTitle }) => {
-    const novelDirPath = path.join(__dirname, '../../../novel');
+    const novelDirPath = getNovelPath();
     const oldFullPath = path.join(novelDirPath, path.basename(oldFilePath)); // 确保只取文件名
     // 清理新标题以确保文件名合法
     const sanitize = (name) => name.replace(/[<>:"/\\|?*]/g, '_');
@@ -755,7 +774,7 @@ const handleUpdateNovelTitle = async (event, { oldFilePath, newTitle }) => {
  
 // 处理保存小说文件内容的请求
 const handleSaveNovelContent = async (event, filePath, content) => {
-    const novelDirPath = path.join(__dirname, '../../../novel');
+    const novelDirPath = getNovelPath();
 
     // 严谨性检查：确保 filePath 是有效的相对路径且不为空
     if (!filePath || typeof filePath !== 'string' || filePath.trim() === '' || filePath === '未选择') {
@@ -922,12 +941,17 @@ function register(store) { // 添加 store 参数
   // Checkpoint Service Handlers
   ipcMain.handle('checkpoints:save', async (event, { taskId, message }) => {
     const { workspaceDir, shadowDir } = await getCheckpointDirs();
-    return await checkpointService.saveCheckpoint(taskId, workspaceDir, shadowDir, message);
+    return await checkpointService.saveArchive(taskId, workspaceDir, shadowDir, message);
   });
 
-  ipcMain.handle('checkpoints:restore', async (event, { taskId, commitHash }) => {
+  ipcMain.handle('checkpoints:restore', async (event, { taskId, archiveId }) => {
     const { workspaceDir, shadowDir } = await getCheckpointDirs();
-    return await checkpointService.restoreCheckpoint(taskId, workspaceDir, shadowDir, commitHash);
+    return await checkpointService.restoreNovelArchive(taskId, workspaceDir, shadowDir, archiveId);
+  });
+
+  ipcMain.handle('checkpoints:delete', async (event, { taskId, archiveId }) => {
+    const { workspaceDir, shadowDir } = await getCheckpointDirs();
+    return await checkpointService.deleteNovelArchive(taskId, workspaceDir, shadowDir, archiveId);
   });
 
   ipcMain.handle('checkpoints:getDiff', async (event, { taskId, from, to }) => {

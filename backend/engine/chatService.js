@@ -122,7 +122,6 @@ async function* chatWithAI(messages, modelId, customSystemPrompt) {
         const messagesToSend = messages.filter(msg => msg.role !== 'system');
         messagesToSend.unshift({ role: "system", content: systemMessageContent, name: "system" });
 
-console.log(`[ChatService] DEBUG: 发送给模型 (${modelId}) 的消息:`, JSON.stringify(messagesToSend, null, 2));
         // 修改此处，处理流式响应
         // 确保 conversationHistory 包含所有必要的消息，特别是对于后续的工具调用
         // 暂时不将完整的 AI 响应存储到 conversationHistory，而是由外部处理
@@ -316,7 +315,6 @@ async function* sendToolResultToAI(toolResultsArray, modelId) {
         );
 
 
-        console.log(`[ChatService] DEBUG: 发送给模型 (${modelId}) 的工具结果消息:`, JSON.stringify(messagesToSend, null, 2));
 
         // **关键修改**: 启用流式传输
         const aiResponse = await adapter.generateCompletion(messagesToSend, {

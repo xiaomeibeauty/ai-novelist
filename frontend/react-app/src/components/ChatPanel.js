@@ -22,7 +22,7 @@ import {
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
 import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
 import useIpcRenderer from '../hooks/useIpcRenderer';
-import { restoreCheckpoint } from '../ipc/checkpointIpcHandler';
+import { restoreNovelArchive } from '../ipc/checkpointIpcHandler';
 import ChatHistoryPanel from './ChatHistoryPanel';
 import NotificationModal from './NotificationModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -457,12 +457,16 @@ const ChatPanel = memo(() => {
                       // 假设 taskId 可以从 sessionId 获得
                       const taskId = msg.sessionId || currentSessionIdRef.current || 'default-task';
                       console.log(`Restoring checkpoint ${msg.checkpointId} for task ${taskId}...`);
-                      const result = await restoreCheckpoint(taskId, msg.checkpointId);
-                      if (result.success) {
-                        setNotification({ show: true, message: '文件已成功恢复到指定版本！' });
-                        // 可以选择性地触发文件内容刷新
-                      } else {
-                        setNotification({ show: true, message: `恢复失败: ${result.error}` });
+                      // The new restore function takes an archiveId, which is what msg.checkpointId represents now.
+                      // Let's also add the user confirmation dialog here for consistency.
+                      if (window.confirm(`当前操作可能使得内容丢失，请提前存档。\n\n确定要恢复到这个存档点吗？`)) {
+                          const result = await restoreNovelArchive(taskId, msg.checkpointId);
+                          if (result.success) {
+                            alert('恢复成功！应用将刷新以加载新内容。');
+                            window.location.reload();
+                          } else {
+                            setNotification({ show: true, message: `恢复失败: ${result.error}` });
+                          }
                       }
                     }}
                   >

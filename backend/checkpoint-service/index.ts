@@ -1,86 +1,90 @@
-import { RepoPerTaskCheckpointService } from "./RepoPerTaskCheckpointService"
-import { CheckpointServiceOptions } from "./types"
+import * as path from "path";
+import { RepoPerTaskCheckpointService } from "./RepoPerTaskCheckpointService";
+import { NovelArchiveService } from "./NovelArchiveService";
+import { CheckpointServiceOptions } from "./types";
 
-// A simple cache to hold service instances per task
-const serviceInstances = new Map<string, RepoPerTaskCheckpointService>()
+// Caches for service instances per task
+const novelArchiveServices = new Map<string, NovelArchiveService>();
+const chatHistoryServices = new Map<string, RepoPerTaskCheckpointService>();
 
-function getServiceInstance(
-	taskId: string,
-	workspaceDir: string,
-	shadowDir: string,
-): RepoPerTaskCheckpointService {
-	if (serviceInstances.has(taskId)) {
-		return serviceInstances.get(taskId)!
-	}
-
-	const options: CheckpointServiceOptions = {
-		taskId,
-		workspaceDir,
-		shadowDir,
-		log: (message) => console.log(`[CheckpointService][${taskId}] ${message}`),
-	}
-
-	const service = RepoPerTaskCheckpointService.create(options)
-	serviceInstances.set(taskId, service)
-
-	// Initialize the shadow git repo in the background
-	service.initShadowGit().catch((error) => {
-		console.error(`[CheckpointService][${taskId}] Failed to initialize shadow git:`, error)
-		// Handle initialization failure, maybe remove from instances
-		serviceInstances.delete(taskId)
-	})
-
-	return service
+function getNovelArchiveService(taskId: string, workspaceDir: string, shadowDir: string): NovelArchiveService {
+    if (novelArchiveServices.has(taskId)) {
+        return novelArchiveServices.get(taskId)!;
+    }
+    const novelWorkspace = workspaceDir; // workspaceDir is already the correct path to the novel files
+    const archivesDir = path.join(shadowDir, 'tasks', taskId, 'novel-archives');
+    const service = new NovelArchiveService(archivesDir, novelWorkspace, (message) => console.log(`[NovelArchiveService][${taskId}] ${message}`));
+    
+    service.init().catch(error => {
+        console.error(`[NovelArchiveService][${taskId}] Failed to initialize:`, error);
+        novelArchiveServices.delete(taskId);
+    });
+    
+    novelArchiveServices.set(taskId, service);
+    return service;
 }
 
-export async function saveCheckpoint(
-	taskId: string,
-	workspaceDir: string,
-	shadowDir: string,
-	message: string,
-) {
-	const service = getServiceInstance(taskId, workspaceDir, shadowDir)
-	if (!service.isInitialized) {
-		await new Promise<void>((resolve) => service.once("initialize", () => resolve()))
-	}
-	return await service.saveCheckpoint(message)
+function getChatHistoryService(taskId: string, workspaceDir: string, shadowDir: string): RepoPerTaskCheckpointService {
+    if (chatHistoryServices.has(taskId)) {
+        return chatHistoryServices.get(taskId)!;
+    }
+    
+    const options: CheckpointServiceOptions = {
+        taskId,
+        workspaceDir,
+        shadowDir,
+        log: (message) => console.log(`[ChatHistoryService][${taskId}] ${message}`),
+    };
+    
+    const service = RepoPerTaskCheckpointService.create(options);
+    chatHistoryServices.set(taskId, service);
+    
+    service.initShadowGit().catch((error) => {
+        console.error(`[ChatHistoryService][${taskId}] Failed to initialize shadow git:`, error);
+        chatHistoryServices.delete(taskId);
+    });
+    
+    return service;
 }
 
-export async function restoreCheckpoint(
-	taskId: string,
-	workspaceDir: string,
-	shadowDir: string,
-	commitHash: string,
-) {
-	const service = getServiceInstance(taskId, workspaceDir, shadowDir)
-	if (!service.isInitialized) {
-		await new Promise<void>((resolve) => service.once("initialize", () => resolve()))
-	}
-	return await service.restoreCheckpoint(commitHash)
+export async function saveArchive(taskId: string, workspaceDir: string, shadowDir: string, message: string) {
+    const novelService = getNovelArchiveService(taskId, workspaceDir, shadowDir);
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+
+    if (!chatService.isInitialized) {
+        await new Promise<void>((resolve) => chatService.once("initialize", () => resolve()));
+    }
+
+    // Perform both archiving operations
+    const novelPromise = novelService.createNovelArchive(message);
+    const chatPromise = chatService.saveCheckpoint(message);
+
+    // We can run them in parallel
+    await Promise.all([novelPromise, chatPromise]);
 }
 
-export async function getDiff(
-	taskId: string,
-	workspaceDir: string,
-	shadowDir: string,
-	from?: string,
-	to?: string,
-) {
-	const service = getServiceInstance(taskId, workspaceDir, shadowDir)
-	if (!service.isInitialized) {
-		await new Promise<void>((resolve) => service.once("initialize", () => resolve()))
-	}
-	return await service.getDiff({ from, to })
+export async function restoreNovelArchive(taskId: string, workspaceDir: string, shadowDir: string, archiveId: string) {
+    const novelService = getNovelArchiveService(taskId, workspaceDir, shadowDir);
+    return await novelService.restoreNovelArchive(archiveId);
 }
 
-export async function getHistory(
-	taskId: string,
-	workspaceDir: string,
-	shadowDir: string,
-) {
-	const service = getServiceInstance(taskId, workspaceDir, shadowDir)
-	if (!service.isInitialized) {
-		await new Promise<void>((resolve) => service.once("initialize", () => resolve()))
-	}
-	return await service.getHistory()
+export async function deleteNovelArchive(taskId: string, workspaceDir: string, shadowDir: string, archiveId: string) {
+    const novelService = getNovelArchiveService(taskId, workspaceDir, shadowDir);
+    return await novelService.deleteNovelArchive(archiveId);
+}
+
+// This function now specifically gets the novel archives for the UI.
+export async function getHistory(taskId: string, workspaceDir: string, shadowDir: string) {
+    const novelService = getNovelArchiveService(taskId, workspaceDir, shadowDir);
+    return await novelService.listNovelArchives();
+}
+
+// The diff function is likely tied to Git, so we leave it for chat history for now,
+// or decide on a new folder-diffing strategy later.
+export async function getDiff(taskId: string, workspaceDir: string, shadowDir: string, from?: string, to?: string) {
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    if (!chatService.isInitialized) {
+        await new Promise<void>((resolve) => chatService.once("initialize", () => resolve()));
+    }
+    return await chatService.getDiff({ from, to });
 }

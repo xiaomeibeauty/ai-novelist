@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSelector } from 'react-redux';
-import { saveCheckpoint, restoreCheckpoint, getHistory, getDiff } from '../ipc/checkpointIpcHandler';
+import { saveArchive, restoreNovelArchive, getHistory, deleteNovelArchive } from '../ipc/checkpointIpcHandler';
 import './CheckpointPanel.css';
 
-const CheckpointPanel = () => {
+const CheckpointPanel = ({ onClose }) => {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -14,8 +14,9 @@ const CheckpointPanel = () => {
         setIsLoading(true);
         setError(null);
         try {
+            // The new getHistory returns the array directly
             const historyResult = await getHistory(currentTaskId);
-            setHistory(historyResult.all || []);
+            setHistory(historyResult || []);
         } catch (err) {
             setError('加载历史记录失败。');
             console.error(err);
@@ -28,16 +29,17 @@ const CheckpointPanel = () => {
         loadHistory();
     }, [loadHistory]);
 
-    const handleSaveCheckpoint = async () => {
+    const handleSaveArchive = async () => {
         if (!currentTaskId) return;
-        const message = prompt('请输入本次保存的说明:', `Checkpoint at ${new Date().toLocaleString()}`);
+        // Revert to automatic message generation to avoid unsupported prompt()
+        const message = `存档于 ${new Date().toLocaleString()}`;
         if (message) {
             setIsLoading(true);
             try {
-                await saveCheckpoint(currentTaskId, message);
+                await saveArchive(currentTaskId, message);
                 await loadHistory(); // Reload history after saving
             } catch (err) {
-                setError('保存快照失败。');
+                setError('保存存档失败。');
                 console.error(err);
             } finally {
                 setIsLoading(false);
@@ -45,16 +47,17 @@ const CheckpointPanel = () => {
         }
     };
 
-    const handleRestoreCheckpoint = async (commitHash) => {
+    const handleRestoreArchive = async (archiveId) => {
         if (!currentTaskId) return;
-        if (window.confirm(`确定要恢复到这个版本吗？\n\n${commitHash}\n\n此操作不可撤销。`)) {
+        if (window.confirm(`当前操作可能使得内容丢失，请提前存档。\n\n确定要恢复到这个存档吗？`)) {
             setIsLoading(true);
             try {
-                await restoreCheckpoint(currentTaskId, commitHash);
+                await restoreNovelArchive(currentTaskId, archiveId);
                 alert('恢复成功！');
-                await loadHistory(); // Reload history to reflect the change
+                // Potentially refresh other parts of the app, e.g., the file tree
+                window.location.reload(); // Simple way to force a full refresh
             } catch (err) {
-                setError('恢复快照失败。');
+                setError('恢复存档失败。');
                 console.error(err);
             } finally {
                 setIsLoading(false);
@@ -62,18 +65,19 @@ const CheckpointPanel = () => {
         }
     };
 
-    const handleShowDiff = async (from, to) => {
+    const handleDeleteArchive = async (archiveId) => {
         if (!currentTaskId) return;
-        // This is a placeholder for showing the diff.
-        // In a real implementation, you'd probably open a modal or a new view
-        // with a proper diff viewer component.
-        try {
-            const diffs = await getDiff(currentTaskId, from, to);
-            console.log(diffs);
-            alert('差异信息已打印到控制台。');
-        } catch (err) {
-            setError('获取差异失败。');
-            console.error(err);
+        if (window.confirm(`确定要永久删除这个存档吗？\n\n此操作不可撤销。`)) {
+            setIsLoading(true);
+            try {
+                await deleteNovelArchive(currentTaskId, archiveId);
+                await loadHistory(); // Refresh the list after deletion
+            } catch (err) {
+                setError('删除存档失败。');
+                console.error(err);
+            } finally {
+                setIsLoading(false);
+            }
         }
     };
 
@@ -83,24 +87,25 @@ const CheckpointPanel = () => {
                 <h3>版本历史</h3>
                 {/* This button should probably be handled by the parent component to switch views */}
             </div>
-            <button onClick={handleSaveCheckpoint} disabled={isLoading}>
-                {isLoading ? '处理中...' : '创建新快照'}
-            </button>
+            <div className="checkpoint-panel-controls">
+                <button onClick={handleSaveArchive} disabled={isLoading}>
+                    {isLoading ? '处理中...' : '创建新存档'}
+                </button>
+                {onClose && <button onClick={onClose} className="button-secondary">退出</button>}
+            </div>
             {error && <div className="error-message">{error}</div>}
             <ul className="checkpoint-history">
-                {history.map((item, index) => (
-                    <li key={item.hash}>
+                {history.map((item) => (
+                    <li key={item.id}>
                         <div className="checkpoint-info">
                             <strong>{item.message}</strong>
-                            <span>{new Date(item.date).toLocaleString()}</span>
-                            <small>{item.hash.substring(0, 7)}</small>
+                            {/* The date can be parsed from the ID */}
+                            <span>{new Date(item.id.split('_')[0]).toLocaleString()}</span>
+                            <small>ID: {item.id.substring(0, 10)}...</small>
                         </div>
                         <div className="checkpoint-actions">
-                            <button onClick={() => handleRestoreCheckpoint(item.hash)} disabled={isLoading}>恢复</button>
-                            <button onClick={() => handleShowDiff(item.hash, 'HEAD')} disabled={isLoading}>与当前版本比较</button>
-                            {index < history.length - 1 && (
-                                <button onClick={() => handleShowDiff(history[index + 1].hash, item.hash)} disabled={isLoading}>与上一版本比较</button>
-                            )}
+                            <button onClick={() => handleDeleteArchive(item.id)} disabled={isLoading} className="button-delete">删除</button>
+                            <button onClick={() => handleRestoreArchive(item.id)} disabled={isLoading}>恢复</button>
                         </div>
                     </li>
                 ))}

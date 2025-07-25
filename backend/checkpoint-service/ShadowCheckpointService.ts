@@ -23,7 +23,6 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	protected readonly dotGitDir: string
 	protected git?: SimpleGit
-	protected readonly log: (message: string) => void
 	protected shadowGitConfigWorktree?: string
 
 	public get baseHash() {
@@ -38,8 +37,13 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		return !!this.git
 	}
 
-	constructor(taskId: string, checkpointsDir: string, workspaceDir: string, log: (message: string) => void) {
+	constructor(taskId: string, checkpointsDir: string, workspaceDir: string, log?: (message: string) => void) {
 		super()
+
+		// The `log` parameter is now optional and deprecated, as we use electron-log via console.
+		if (log) {
+			console.warn("[ShadowCheckpointService] The `log` parameter in the constructor is deprecated.")
+		}
 
 		const homedir = os.homedir()
 		const desktopPath = path.join(homedir, "Desktop")
@@ -56,7 +60,6 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		this.workspaceDir = workspaceDir
 
 		this.dotGitDir = path.join(this.checkpointsDir, ".git")
-		this.log = log
 	}
 
 	public async initShadowGit(onInit?: () => Promise<void>) {
@@ -67,25 +70,26 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		await fs.mkdir(this.checkpointsDir, { recursive: true })
 		const git = simpleGit(this.checkpointsDir)
 		const gitVersion = await git.version()
-		this.log(`[${this.constructor.name}#create] git = ${gitVersion}`)
+		console.log(`[${this.constructor.name}#create] git = ${gitVersion}`)
 
 		let created = false
 		const startTime = Date.now()
 
 		if (await fileExistsAtPath(this.dotGitDir)) {
-			this.log(`[${this.constructor.name}#initShadowGit] shadow git repo already exists at ${this.dotGitDir}`)
+			console.log(`[${this.constructor.name}#initShadowGit] shadow git repo already exists at ${this.dotGitDir}`)
 			const worktree = await this.getShadowGitConfigWorktree(git)
 
-			if (worktree !== this.workspaceDir) {
-				throw new Error(
-					`Checkpoints can only be used in the original workspace: ${worktree} !== ${this.workspaceDir}`,
+			if (worktree && worktree !== this.workspaceDir) {
+				console.warn(
+					`[ShadowCheckpointService] Workspace directory has changed. Updating from "${worktree}" to "${this.workspaceDir}".`,
 				)
+				await git.addConfig("core.worktree", this.workspaceDir)
 			}
 
 			await this.writeExcludeFile()
 			this.baseHash = await git.revparse(["HEAD"])
 		} else {
-			this.log(`[${this.constructor.name}#initShadowGit] creating shadow git repo at ${this.checkpointsDir}`)
+			console.log(`[${this.constructor.name}#initShadowGit] creating shadow git repo at ${this.checkpointsDir}`)
 			await git.init()
 			await git.addConfig("core.worktree", this.workspaceDir) // Sets the working tree to the current workspace.
 			await git.addConfig("commit.gpgSign", "false") // Disable commit signing for shadow repo.
@@ -100,7 +104,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 		const duration = Date.now() - startTime
 
-		this.log(
+		console.log(
 			`[${this.constructor.name}#initShadowGit] initialized shadow repo with base commit ${this.baseHash} in ${duration}ms`,
 		)
 
@@ -136,9 +140,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		try {
 			await git.add(".")
 		} catch (error) {
-			this.log(
-				`[${this.constructor.name}#stageAll] failed to add files to git: ${error instanceof Error ? error.message : String(error)}`,
-			)
+			console.error(`[${this.constructor.name}#stageAll] failed to add files to git:`, error)
 		} finally {
 			await this.renameNestedGitRepos(false)
 		}
@@ -158,7 +160,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			).filter(({ type, path }) => type === "folder" && path.includes(".git") && !path.startsWith(".git"))
 
 		if (!gitPaths || gitPaths.length === 0) {
-			this.log(`[${this.constructor.name}#renameNestedGitRepos] no nested git repos found or ripgrep failed. Skipping.`);
+			console.log(`[${this.constructor.name}#renameNestedGitRepos] no nested git repos found or ripgrep failed. Skipping.`);
 			return;
 		}
 
@@ -188,18 +190,20 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				try {
 					await fs.rename(currentPath, newPath)
 
-					this.log(
+					console.log(
 						`[${this.constructor.name}#renameNestedGitRepos] ${disable ? "disabled" : "enabled"} nested git repo ${currentPath}`,
 					)
 				} catch (error) {
-					this.log(
-						`[${this.constructor.name}#renameNestedGitRepos] failed to ${disable ? "disable" : "enable"} nested git repo ${currentPath}: ${error instanceof Error ? error.message : String(error)}`,
+					console.error(
+						`[${this.constructor.name}#renameNestedGitRepos] failed to ${disable ? "disable" : "enable"} nested git repo ${currentPath}:`,
+						error,
 					)
 				}
 			}
 		} catch (error) {
-			this.log(
-				`[${this.constructor.name}#renameNestedGitRepos] failed to ${disable ? "disable" : "enable"} nested git repos: ${error instanceof Error ? error.message : String(error)}`,
+			console.error(
+				`[${this.constructor.name}#renameNestedGitRepos] failed to ${disable ? "disable" : "enable"} nested git repos:`,
+				error,
 			)
 		}
 	}
@@ -209,8 +213,9 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			try {
 				this.shadowGitConfigWorktree = (await git.getConfig("core.worktree")).value || undefined
 			} catch (error) {
-				this.log(
-					`[${this.constructor.name}#getShadowGitConfigWorktree] failed to get core.worktree: ${error instanceof Error ? error.message : String(error)}`,
+				console.error(
+					`[${this.constructor.name}#getShadowGitConfigWorktree] failed to get core.worktree:`,
+					error,
 				)
 			}
 		}
@@ -220,7 +225,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	public async saveCheckpoint(message: string): Promise<CheckpointResult | undefined> {
 		try {
-			this.log(`[${this.constructor.name}#saveCheckpoint] starting checkpoint save`)
+			console.log(`[${this.constructor.name}#saveCheckpoint] starting checkpoint save`)
 
 			if (!this.git) {
 				throw new Error("Shadow git repo not initialized")
@@ -240,7 +245,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			}
 
 			if (result.commit) {
-				this.log(
+				console.log(
 					`[${this.constructor.name}#saveCheckpoint] checkpoint saved in ${duration}ms -> ${result.commit}`,
 				)
 				            // 修正：返回一个标准的 CheckpointResult 对象
@@ -248,44 +253,37 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				            // CommitResult 对象本身就包含了 commit 字段，可以直接返回
 				            return result;
 			} else {
-				this.log(`[${this.constructor.name}#saveCheckpoint] found no changes to commit in ${duration}ms`)
+				console.log(`[${this.constructor.name}#saveCheckpoint] found no changes to commit in ${duration}ms`)
 				return undefined
 			}
-		} catch (e) {
-			const error = e instanceof Error ? e : new Error(String(e))
-			this.log(`[${this.constructor.name}#saveCheckpoint] failed to create checkpoint: ${error.message}`)
-			this.emit("error", { type: "error", error })
+		} catch (error) {
+			console.error(`[${this.constructor.name}#saveCheckpoint] failed to create checkpoint:`, error)
+			this.emit("error", { type: "error", error: error as Error })
 			throw error
 		}
 	}
 
 	public async restoreCheckpoint(commitHash: string) {
 		try {
-			this.log(`[${this.constructor.name}#restoreCheckpoint] starting checkpoint restore`)
+			console.log(`[${this.constructor.name}#restoreCheckpoint] starting checkpoint restore`)
 
 			if (!this.git) {
 				throw new Error("Shadow git repo not initialized")
 			}
 
 			const start = Date.now()
+			// Per user request, perform a hard reset.
+			// The frontend is now responsible for warning the user about data loss.
 			await this.git.clean("f", ["-d", "-f"])
 			await this.git.reset(["--hard", commitHash])
 
-			// Remove all checkpoints after the specified commitHash.
-			const checkpointIndex = this._checkpoints.indexOf(commitHash)
-
-			if (checkpointIndex !== -1) {
-				this._checkpoints = this._checkpoints.slice(0, checkpointIndex + 1)
-			}
-
 			const duration = Date.now() - start
 			this.emit("restore", { type: "restore", commitHash, duration })
-			this.log(`[${this.constructor.name}#restoreCheckpoint] restored checkpoint ${commitHash} in ${duration}ms`)
+			console.log(`[${this.constructor.name}#restoreCheckpoint] restored checkpoint ${commitHash} in ${duration}ms`)
 			return { success: true, commitHash }
-		} catch (e) {
-			const error = e instanceof Error ? e : new Error(String(e))
-			this.log(`[${this.constructor.name}#restoreCheckpoint] failed to restore checkpoint: ${error.message}`)
-			this.emit("error", { type: "error", error })
+		} catch (error) {
+			console.error(`[${this.constructor.name}#restoreCheckpoint] failed to restore checkpoint:`, error)
+			this.emit("error", { type: "error", error: error as Error })
 			throw error
 		}
 	}
@@ -304,7 +302,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		// Stage all changes so that untracked files appear in diff summary.
 		await this.stageAll(this.git)
 
-		this.log(`[${this.constructor.name}#getDiff] diffing ${to ? `${from}..${to}` : `${from}..HEAD`}`)
+		console.log(`[${this.constructor.name}#getDiff] diffing ${to ? `${from}..${to}` : `${from}..HEAD`}`)
 		const { files } = to ? await this.git.diffSummary([`${from}..${to}`]) : await this.git.diffSummary([from])
 
 		const cwdPath = (await this.getShadowGitConfigWorktree(this.git)) || this.workspaceDir || ""

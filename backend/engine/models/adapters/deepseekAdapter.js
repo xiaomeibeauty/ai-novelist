@@ -22,13 +22,20 @@ class DeepSeekAdapter extends BaseModelAdapter {
 
     async *generateCompletion(messages, options) {
         try {
-            const completion = await this.openaiClient.chat.completions.create({
-                messages: messages,
+            // 关键修复：仅从消息中移除 'reasoning_content'，保留所有其他字段，
+            // 以免移除 'tool_call_id' 或 'name' 等必要字段。
+            const processedMessages = messages.map(({ reasoning_content, ...rest }) => rest);
+            const params = {
+                messages: processedMessages,
                 model: options.model || "deepseek-chat", // 默认使用 deepseek-chat
                 tools: options.tools,
                 tool_choice: options.tool_choice || "auto",
                 stream: options.stream || false
-            });
+            };
+
+            console.log(`[Adapter] Sending to DeepSeek:`, JSON.stringify(params, null, 2));
+
+            const completion = await this.openaiClient.chat.completions.create(params);
 
             if (options.stream) {
                 for await (const chunk of completion) {

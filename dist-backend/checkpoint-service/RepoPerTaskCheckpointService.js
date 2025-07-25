@@ -27,8 +27,8 @@ exports.RepoPerTaskCheckpointService = void 0;
 const path = __importStar(require("path"));
 const ShadowCheckpointService_1 = require("./ShadowCheckpointService");
 class RepoPerTaskCheckpointService extends ShadowCheckpointService_1.ShadowCheckpointService {
-    static create({ taskId, workspaceDir, shadowDir, log = console.log }) {
-        return new RepoPerTaskCheckpointService(taskId, path.join(shadowDir, "tasks", taskId, "checkpoints"), workspaceDir, log);
+    static create({ taskId, workspaceDir, shadowDir }) {
+        return new RepoPerTaskCheckpointService(taskId, path.join(shadowDir, "tasks", taskId, "checkpoints"), workspaceDir);
     }
 }
 exports.RepoPerTaskCheckpointService = RepoPerTaskCheckpointService;

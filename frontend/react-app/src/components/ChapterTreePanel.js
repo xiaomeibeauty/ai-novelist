@@ -372,7 +372,8 @@ function ChapterTreePanel() {
         counter++;
     }
 
-    await handleIPCAction('create-novel-file', { title: newTitleWithExt, content: '', parentPath });
+    const newFilePath = parentPath ? `${parentPath}/${newTitleWithExt}` : newTitleWithExt;
+    await handleIPCAction('create-novel-file', { filePath: newFilePath, content: '' });
     handleCloseContextMenu();
   }, [handleIPCAction, chapters, handleCloseContextMenu, getDisplayName]);
 
@@ -564,7 +565,7 @@ function ChapterTreePanel() {
             )}
           </div>
         ) : (
-          <CheckpointPanel />
+          <CheckpointPanel onClose={() => setCurrentView('chapters')} />
         )}
       </div>
 

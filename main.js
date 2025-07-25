@@ -3,6 +3,23 @@ const path = require('path');
 const isDev = require('electron-is-dev');
 const fs = require('fs').promises;
 const { throttle } = require('lodash');
+const log = require('electron-log');
+
+// =================================================================
+// 日志配置
+// =================================================================
+// 将 console 输出重定向到日志文件
+Object.assign(console, log.functions);
+
+// 捕获未处理的异常
+log.catchErrors();
+
+// 您可以在以下路径找到日志文件:
+// on Linux: ~/.config/<app name>/logs/main.log
+// on macOS: ~/Library/Logs/<app name>/main.log
+// on Windows: %USERPROFILE%\AppData\Roaming\<app name>\logs\main.log
+console.log('日志服务已启动。');
+// =================================================================
 
 // 必须在 app.ready 事件之前注册协议
 protocol.registerSchemesAsPrivileged([
