@@ -411,24 +411,24 @@ const handleProcessCommand = async (event, { message, sessionId, currentMessages
     }
 };
  
-// 处理用户回复 (针对 ask_user_question)
-const handleSendUserResponse = async (event, userResponse, toolCallId) => {
-    console.log(`收到用户回复：${userResponse}，关联 toolCallId: ${toolCallId}`);
+// 新的、修复后的用户问题回复处理器
+const handleUserQuestionResponse = async (event, { response, toolCallId }) => {
+    console.log(`[handlers.js] 收到用户问题回复: "${response}", 关联 toolCallId: ${toolCallId}`);
 
-    // 幂等性检查：防止因前端事件重复触发而多次处理同一个工具回复
+    // 幂等性检查
     const alreadyProcessed = state.conversationHistory.some(msg => msg.role === 'tool' && msg.tool_call_id === toolCallId);
     if (alreadyProcessed) {
         console.warn(`[handlers.js] 检测到对 toolCallId: ${toolCallId} 的重复回复。已忽略。`);
-        return;
+        return { success: true, message: '重复的回复，已忽略。' };
     }
 
     try {
         const toolResultsArray = [{
             toolCallId: toolCallId,
             toolName: "ask_user_question",
-            result: userResponse
+            result: { content: response } // 将结果包装在对象中以保持一致性
         }];
-
+        
         // 获取默认模型 ID
         if (!storeInstance) {
             const StoreModule = await import('electron-store');
@@ -436,12 +436,44 @@ const handleSendUserResponse = async (event, userResponse, toolCallId) => {
             storeInstance = new Store();
         }
         const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+        const customSystemPrompt = storeInstance.get('customSystemPrompt');
 
-        await chatService.sendToolResultToAI(toolResultsArray, defaultModelId); // 修改并添加 modelId 参数
+        // **关键修复**: 调用新的流式 sendToolResultToAI 并正确处理其输出
+        const stream = chatService.sendToolResultToAI(toolResultsArray, defaultModelId);
+        
+        const sessionId = state.conversationHistory.length > 0 ? state.conversationHistory.find(m => m.sessionId)?.sessionId : null;
+
+        for await (const chunk of stream) {
+            if (chunk.type === 'text') {
+                if (chatService.getStreamingMode()) {
+                    chatService._sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: sessionId });
+                } else {
+                    chatService._sendAiResponseToFrontend('text', { content: chunk.content, sessionId: sessionId });
+                }
+            } else if (chunk.type === 'tool_calls' && chunk.content) {
+                 if (chatService.getStreamingMode()) {
+                    for (const delta of chunk.content) {
+                        chatService._sendAiResponseToFrontend('tool_stream', [delta]);
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                } else {
+                    chatService._sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
+                }
+            } else if (chunk.type === 'error') {
+                chatService._sendAiResponseToFrontend('error', chunk.payload);
+            }
+        }
+        // 仅在流式模式下才需要发送流结束信号
+        if (chatService.getStreamingMode()) {
+            chatService._sendAiResponseToFrontend('text_stream_end', null);
+        }
+
+        return { success: true };
 
     } catch (error) {
-        console.error("处理用户回复后再次调用 AI API 失败:", error);
-        chatService._sendAiResponseToFrontend('error', `处理用户回复后 AI 反馈失败: ${error.message}`); // 修改
+        console.error("[handlers.js] 处理用户回复后再次调用 AI API 失败:", error);
+        chatService._sendAiResponseToFrontend('error', `处理用户回复后 AI 反馈失败: ${error.message}`);
+        return { success: false, error: error.message };
     }
 };
 
@@ -918,7 +950,7 @@ function register(store) { // 添加 store 参数
   // ipcMain.handle('process-batch-action', handleProcessBatchAction); // This is now obsolete
   ipcMain.handle('send-batch-tool-results', handleSendBatchToolResults);
   ipcMain.handle('process-command', handleProcessCommand);
-  ipcMain.handle('send-user-response', handleSendUserResponse);
+  ipcMain.handle('user-question-response', handleUserQuestionResponse);
   ipcMain.handle('list-novel-files', handleListNovelFiles); // 新增：注册列出 novel 目录下所有文件请求
   ipcMain.handle('get-chapters', handleGetChapters); // 注册新的IPC处理器
   ipcMain.handle('load-chapter-content', handleLoadChapterContent); // 注册新的IPC处理器
@@ -1000,7 +1032,7 @@ exports.register = register;
 exports.setMainWindow = setMainWindow;
 exports.state = state;
 exports.processCommand = handleProcessCommand;
-exports.sendUserResponse = handleSendUserResponse;
+exports.sendUserResponse = handleUserQuestionResponse;
 exports.processToolAction = handleProcessToolAction;
 // exports.processBatchAction = handleProcessBatchAction; // This is now obsolete
 exports.getChaptersAndUpdateFrontend = getChaptersAndUpdateFrontend; // 导出新函数

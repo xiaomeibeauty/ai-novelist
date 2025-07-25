@@ -187,10 +187,7 @@ We welcome and thank all contributors! If you have any bug reports, feature sugg
 
 ## License
 
-This project uses the [MIT License](LICENSE), and all contributors must sign off via DCO. Project maintainers have the right to use the code for closed-source commercial products while maintaining the open-source version.
-
-**Future Development and Copyright Management**:
-This project aims to be an active open-source project. We encourage all forms of contributions and are committed to ensuring the project's legality and compliance within the MIT license framework. Currently, all contributions are considered licensed under the MIT License. However, to address potential future commercialization needs or more stringent intellectual property management, the project may consider introducing a **CLA (Contributor License Agreement)** to completely avoid potential legal risks. At that time, we will provide detailed CLA policies and signing procedures in `CONTRIBUTING.md`.
+This project uses the [MIT License](LICENSE).
 
 ## Next Version Development Goals
 

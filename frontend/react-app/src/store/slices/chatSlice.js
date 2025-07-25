@@ -288,8 +288,9 @@ const chatSlice = createSlice({
                 const suggestions = payload;
                 const lastMessageForSuggestions = currentMessages[currentMessages.length - 1];
                 
-                // **最终修复**: 在 suggestions 中直接处理 end_task
+                // **最终修复**: 在 suggestions 中直接处理 end_task 和 ask_user_question
                 const endTaskTool = suggestions.find(tool => tool.function && tool.function.name === 'end_task');
+                const askUserQuestionTool = suggestions.find(tool => tool.function && tool.function.name === 'ask_user_question');
 
                 if (endTaskTool) {
                     let summary = "任务已完成。"; // 默认总结
@@ -309,6 +310,18 @@ const chatSlice = createSlice({
                     }
                     
                     // 重置状态，不显示批准按钮
+                    state.pendingToolCalls = [];
+                    state.toolCallState = 'idle';
+
+                } else if (askUserQuestionTool) {
+                    // 如果是提问工具，则设置 questionCard
+                    const args = askUserQuestionTool.toolArgs || JSON.parse(askUserQuestionTool.function.arguments);
+                    state.questionCard = {
+                        question: args.question,
+                        options: args.options || [],
+                        toolCallId: askUserQuestionTool.toolCallId
+                    };
+                    // 清空待处理工具调用，并将状态设为 idle，因为这个问题由一个专门的卡片处理
                     state.pendingToolCalls = [];
                     state.toolCallState = 'idle';
 

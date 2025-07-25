@@ -164,14 +164,49 @@ const ChatPanel = memo(() => {
     }
   }, [dispatch, getStoreValue, setDeepseekApiKey, setOpenaiApiKey, setOpenrouterApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider, setCustomSystemPrompt]); // 更新依赖
 
-  const handleSendMessage = useCallback(async (messageText) => { // 将 command 改名为 messageText
+  const handleUserQuestionResponse = useCallback(async (response, toolCallId, isButtonClick) => {
+    dispatch(setQuestionCard(null));
+
+    const formattedResponse = isButtonClick
+      ? `同意/批准此建议：${response}`
+      : `用户暂时没有采纳这些建议，而是给出了其他回复：${response}`;
+    
+    // 将用户的原始回复（未格式化）添加到聊天记录中
+    dispatch(appendMessage({ sender: 'User', text: response, role: 'user', content: response, className: 'user', sessionId: toolCallId }));
+
+    if (enableStream) {
+      dispatch(appendMessage({
+        sender: 'AI',
+        text: '',
+        role: 'assistant',
+        content: '',
+        className: 'ai',
+        sessionId: toolCallId, // Use the same session ID for the loading response
+        isLoading: true,
+      }));
+    }
+    
+    try {
+      await invoke('user-question-response', { response: formattedResponse, toolCallId });
+    } catch (error) {
+      console.error('Error sending user question response:', error);
+    }
+  }, [dispatch, invoke, enableStream]);
+
+  const handleSendMessage = useCallback(async (messageText) => {
     if (!messageText.trim()) return;
 
-    // 1. 获取当前会话的 sessionId
-    const currentSessionId = currentSessionIdRef.current || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    currentSessionIdRef.current = currentSessionId; // 确保 currentSessionIdRef 更新
+    // **新逻辑**: 检查是否存在一个待回答的问题
+    if (questionCard && questionCard.toolCallId) {
+      // 如果有，则此消息是对该问题的回答
+      handleUserQuestionResponse(messageText, questionCard.toolCallId, false);
+      return; // 结束函数，不执行常规消息发送
+    }
 
-    // 2. 创建新的用户消息，并赋予 sessionId
+    // --- 以下是常规消息发送逻辑 ---
+    const currentSessionId = currentSessionIdRef.current || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    currentSessionIdRef.current = currentSessionId;
+
     const newUserMessage = {
       sender: 'User',
       text: messageText,
@@ -180,9 +215,8 @@ const ChatPanel = memo(() => {
       className: 'user',
       sessionId: currentSessionId,
     };
-    dispatch(appendMessage(newUserMessage)); // 追加用户消息
+    dispatch(appendMessage(newUserMessage));
 
-    // 如果启用了流式传输，立即添加一个 AI 消息占位符
     if (enableStream) {
       dispatch(appendMessage({
         sender: 'AI',
@@ -191,23 +225,19 @@ const ChatPanel = memo(() => {
         content: '',
         className: 'ai',
         sessionId: currentSessionId,
-        isLoading: true, // 添加 isLoading 状态
+        isLoading: true,
       }));
     }
 
-    // dispatch(clearToolSuggestions()); // This is now handled by the new tool call flow
-    dispatch(setQuestionCard(null)); // 清除提问卡片
+    dispatch(setQuestionCard(null));
 
     try {
-      // 3. 将包含新消息和历史消息的完整数组作为上下文传递给后端
-      // 这里的 messages 已经是 Redux state，不需要再手动构建 messagesToSend
-      // **关键修复**: 移除多余的 stream 参数，因为后端现在通过 'set-streaming-mode' 事件管理状态
       await invoke('process-command', { message: messageText, sessionId: currentSessionId, currentMessages: messages });
     } catch (error) {
       console.error('Error sending message to AI:', error);
       dispatch(appendMessage({ sender: 'System', text: `发送消息失败: ${error.message}`, role: 'system', content: `发送消息失败: ${error.message}`, className: 'system-error' }));
     }
-  }, [dispatch, invoke, messages]); // 依赖中添加 dispatch, invoke, messages
+  }, [dispatch, invoke, messages, questionCard, handleUserQuestionResponse, enableStream]);
 
   // New handler for approving/rejecting all pending tool calls
   const handleToolApproval = useCallback(async (action) => {
@@ -287,15 +317,6 @@ const ChatPanel = memo(() => {
   }, [dispatch, loadSettings]); // 依赖中添加 dispatch, loadSettings
 
 
-  const handleUserQuestionResponse = useCallback(async (response, toolCallId) => { // 将 handleUserQuestionResponse 封装为 useCallback
-    dispatch(setQuestionCard(null));
-    dispatch(appendMessage({ sender: 'user', text: response, role: 'user', content: response, className: 'user', sessionId: toolCallId })); // 添加更多消息属性
-    try {
-      await invoke('user-question-response', { response, toolCallId }); // 调整为 invoke 的 payload 格式
-    } catch (error) {
-      console.error('Error sending user question response:', error);
-    }
-  }, [dispatch, invoke]); // 依赖中添加 dispatch, invoke
 
   const handleResetChat = useCallback(async () => { // 将 handleResetChat 封装为 useCallback
     dispatch(setMessages([])); // 清除聊天消息
@@ -541,20 +562,22 @@ const ChatPanel = memo(() => {
         )}
 
         {questionCard && (
-          <div className="ai ask-question">
-            <p>AI 提问：{questionCard.question}</p>
-            <div className="question-actions">
-              {questionCard.options && questionCard.options.length > 0 ? (
+          <div className="ai-question-card">
+            <p className="ai-question-text">{questionCard.question}</p>
+            <div className="ai-question-options">
+              {questionCard.options && questionCard.options.length > 0 && (
                 questionCard.options.map((option, index) => (
-                  <button key={index} onClick={() => handleUserQuestionResponse(option, questionCard.toolCallId)}>{option}</button>
+                  <button
+                    key={index}
+                    className="ai-question-option-button"
+                    onClick={() => handleUserQuestionResponse(option, questionCard.toolCallId, true)}
+                  >
+                    {option}
+                  </button>
                 ))
-              ) : (
-                <>
-                  <input type="text" placeholder="请输入您的回复..." id="question-input" />
-                  <button onClick={() => handleUserQuestionResponse(document.getElementById('question-input').value, questionCard.toolCallId)}>发送回复</button>
-                </>
               )}
             </div>
+            {/* 输入区域已被移除，用户应使用主输入框进行回复 */}
           </div>
         )}
         <div className="chat-input-group">
