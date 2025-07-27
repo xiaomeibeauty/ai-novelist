@@ -71,7 +71,12 @@ class MCPService {
   async insertContent(args) {
     try {
       const { path: relPath, paragraph, content } = args;
-      const filePath = path.join(this.novelPath, relPath);
+      // 如果 AI 提供的路径以 'novel/' 或 'novel\' 开头，则移除它
+      let cleanPath = relPath;
+      if (cleanPath.startsWith('novel/') || cleanPath.startsWith('novel\\')) {
+        cleanPath = cleanPath.substring('novel/'.length);
+      }
+      const filePath = path.join(this.novelPath, cleanPath);
       const fileContent = await fs.readFile(filePath, 'utf-8');
       const paragraphs = fileContent.split('\n');
       
@@ -97,7 +102,12 @@ class MCPService {
   async searchAndReplace(args) {
     try {
       const { path: relPath, search, replace, use_regex, ignore_case } = args;
-      const filePath = path.join(this.novelPath, relPath);
+      // 如果 AI 提供的路径以 'novel/' 或 'novel\' 开头，则移除它
+      let cleanPath = relPath;
+      if (cleanPath.startsWith('novel/') || cleanPath.startsWith('novel\\')) {
+        cleanPath = cleanPath.substring('novel/'.length);
+      }
+      const filePath = path.join(this.novelPath, cleanPath);
       const fileContent = await fs.readFile(filePath, 'utf-8');
 
       const flags = ignore_case ? 'gi' : 'g';
@@ -119,7 +129,12 @@ class MCPService {
             throw new Error("Diff content is invalid.");
         }
 
-        const filePath = path.join(this.novelPath, relPath);
+        // 如果 AI 提供的路径以 'novel/' 或 'novel\' 开头，则移除它
+        let cleanPath = relPath;
+        if (cleanPath.startsWith('novel/') || cleanPath.startsWith('novel\\')) {
+          cleanPath = cleanPath.substring('novel/'.length);
+        }
+        const filePath = path.join(this.novelPath, cleanPath);
 
         // 1. Read original content
         const originalContent = await fs.readFile(filePath, 'utf-8');
@@ -152,10 +167,13 @@ class MCPService {
   async searchFiles(args) {
     try {
         const { path: dirPath, regex, file_pattern } = args;
-        // Sanitize the AI-provided path to ensure it's treated as relative to the novel directory.
+        // 如果 AI 提供的路径以 'novel/' 或 'novel\' 开头，则移除它，因为 this.novelPath 已经包含了 'novel' 目录
         let cleanDirPath = dirPath;
         if (cleanDirPath.startsWith('novel/') || cleanDirPath.startsWith('novel\\')) {
             cleanDirPath = cleanDirPath.substring('novel/'.length);
+        } else if (cleanDirPath === 'novel') {
+            // 如果路径就是 'novel' 本身, 意味着搜索 novel 根目录, 此时 cleanDirPath 应该为空字符串
+            cleanDirPath = '';
         }
 
         // Always base the search inside this.novelPath for security and consistency.

@@ -226,10 +226,17 @@ const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
                     if (filePathArg) {
                         // 构造正确的 novel 目录根路径
                         const novelRootDir = getNovelPath();
+                        
+                        // 清理 AI 可能提供的、带 'novel/' 前缀的路径
+                        let cleanFilePath = filePathArg;
+                        if (cleanFilePath.startsWith('novel/') || cleanFilePath.startsWith('novel\\')) {
+                            cleanFilePath = cleanFilePath.substring('novel/'.length);
+                        }
+
                         // 构造文件的完整绝对路径
-                        const fullPath = path.join(novelRootDir, filePathArg);
+                        const fullPath = path.join(novelRootDir, cleanFilePath);
                         // 构造前端使用的、带 'novel/' 前缀的相对路径 ID
-                        const frontendPathId = `novel/${filePathArg.replace(/\\/g, '/')}`;
+                        const frontendPathId = `novel/${cleanFilePath.replace(/\\/g, '/')}`;
 
                         try {
                             const newContent = await fs.readFile(fullPath, 'utf8');

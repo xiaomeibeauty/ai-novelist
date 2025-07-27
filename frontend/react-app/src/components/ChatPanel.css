@@ -622,20 +622,22 @@ input:checked + .slider:before {
   border-radius: 50%;
 }
 /* Tool Action Bar Styles */
+/* Tool Action Bar Styles */
 .tool-action-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
-  background-color: #f0f0f0;
-  border-top: 1px solid #ccc;
-  border-bottom: 1px solid #ccc;
-  margin-bottom: 5px; /* Add some space before the input box */
+  padding: 4px 12px; /* 减小垂直内边距以降低高度 */
+  background-color: #2c2c2e; /* 改为深灰色背景 */
+  border-top: 1px solid #444;
+  border-bottom: 1px solid #444;
+  margin-bottom: 0;
 }
 
 .tool-action-bar span {
   font-weight: bold;
-  color: #333;
+  color: #abb2bf; /* 改为浅灰色文字 */
+  font-size: 0.9em;
 }
 
 .tool-action-buttons {
@@ -645,33 +647,35 @@ input:checked + .slider:before {
 
 .tool-action-buttons .approve-all-button,
 .tool-action-buttons .reject-all-button {
-  padding: 6px 12px;
+  padding: 4px 10px; /* 减小按钮内边距 */
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-weight: bold;
+  transition: background-color 0.2s ease;
 }
 
 .tool-action-buttons .approve-all-button {
-  background-color: #28a745;
+  background-color: #357abd; /* 批准按钮改为蓝色 */
   color: white;
 }
 
 .tool-action-buttons .approve-all-button:hover {
-  background-color: #218838;
+  background-color: #4a90e2; /* 悬停时颜色变亮 */
 }
 
 .tool-action-buttons .reject-all-button {
-  background-color: #dc3545;
+  background-color: #555555; /* 拒绝按钮改为中性灰色 */
   color: white;
 }
 
 .tool-action-buttons .reject-all-button:hover {
-  background-color: #c82333;
+  background-color: #666666;
 }
 
 .tool-action-buttons button:disabled {
-  background-color: #cccccc;
+  background-color: #444;
+  color: #888;
   cursor: not-allowed;
 }
 

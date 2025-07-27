@@ -107,9 +107,8 @@ class MultiSearchReplaceStrategy {
         const validSeq = this.validateMarkerSequencing(diffContent);
         if (!validSeq.success) return validSeq;
 
-        const matches = [...diffContent.matchAll(
-            /(?:^|\n)(?<!\\)<<<<<<< SEARCH\s*\n((?:\:start_line:\s*(\d+)\s*\n))?((?:\:end_line:\s*(\d+)\s*\n))?((?<!\\)-------\s*\n)?([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)=======\s*\n)([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)>>>>>>> REPLACE)(?=\n|$)/g
-        )];
+        const diffBlockRegex = /(?:^|\n)(?<!\\)<<<<<<< SEARCH\s*\n([\s\S]*?)(?<!\\)-------\s*\n([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)=======\s*\n)([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)>>>>>>> REPLACE)(?=\n|$)/g;
+        const matches = [...diffContent.matchAll(diffBlockRegex)];
 
         if (matches.length === 0) return { success: false, error: "Invalid diff format - no valid SEARCH/REPLACE blocks found." };
 
@@ -119,11 +118,23 @@ class MultiSearchReplaceStrategy {
         let appliedCount = 0;
         const failParts = [];
 
-        const replacements = matches.map(match => ({
-            startLine: Number(match[2] ?? 0),
-            searchContent: match[6],
-            replaceContent: match[7],
-        })).sort((a, b) => a.startLine - b.startLine);
+        const replacements = matches.map(match => {
+            const metadataBlock = match[1];
+            const searchContent = match[2];
+            const replaceContent = match[3];
+
+            let startLine = 0;
+            const startLineMatch = metadataBlock.match(/\:(?:start_line|start_paragraph):\s*(\d+)/);
+            if (startLineMatch) {
+                startLine = Number(startLineMatch[1]);
+            }
+            
+            return {
+                startLine,
+                searchContent,
+                replaceContent,
+            };
+        }).sort((a, b) => a.startLine - b.startLine);
 
         for (let replacement of replacements) {
             let { searchContent, replaceContent } = replacement;

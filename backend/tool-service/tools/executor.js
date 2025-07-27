@@ -58,8 +58,7 @@ async function performToolExecution(toolCallId, toolName, toolArgs, mainWindow) 
                 logger.writeLog(`[executor.js] 发送 file-written 事件`);
                 finalMessage = `章节 '${chapterId}' 已创建/更新，并已加载到编辑框。`;
             } else if (toolName === "read_file") {
-                mainWindow.webContents.send('update-novel-content', toolResult.content);
-                mainWindow.webContents.send('update-current-file', toolArgs.path);
+                mainWindow.webContents.send('file-written', { filePath: toolArgs.path, content: toolResult.content });
                 finalMessage = `文件 '${toolArgs.path}' 读取成功。内容已载入编辑框。`;
             } else if (toolName === "end_task") {
                 // end_task 工具的执行结果不应被添加到 conversationHistory

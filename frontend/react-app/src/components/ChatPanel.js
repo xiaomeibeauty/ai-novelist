@@ -88,7 +88,7 @@ const ChatPanel = memo(() => {
   const [notification, setNotification] = useState({ show: false, message: '' });
   const [editingText, setEditingText] = useState('');
 
-  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send } = useIpcRenderer();
+  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send, on, removeListener } = useIpcRenderer();
   // 将 loadSettings 定义为 useCallback，确保其稳定性
   const loadSettings = useCallback(async () => {
     try {
@@ -379,60 +379,50 @@ const ChatPanel = memo(() => {
     loadSettings();
   }, [loadSettings]); // loadSettings 已经是 useCallback，依赖稳定
 
+  // 新增：处理 show-diff-preview 事件的专用 effect
+  useEffect(() => {
+    const handleShowDiffPreview = (event, data) => {
+        console.log('[ChatPanel] 收到 show-diff-preview 事件:', data);
+        const { filePath, suggestedContent } = data;
+
+        // 确保收到的数据有效
+        if (!filePath || typeof suggestedContent !== 'string') {
+            console.warn('[ChatPanel] show-diff-preview 事件缺少必要数据。');
+            return;
+        }
+
+        // 兼容性修复：在匹配前，将两边的路径都统一为不带 'novel/' 前缀的干净格式
+        const cleanIncomingPath = filePath.startsWith('novel/') ? filePath.substring(6) : filePath;
+        
+        const targetTab = openTabs.find(tab => {
+            const cleanTabId = tab.id.startsWith('novel/') ? tab.id.substring(6) : tab.id;
+            return cleanTabId === cleanIncomingPath;
+        });
+
+        if (targetTab) {
+            console.log(`[ChatPanel] 兼容性匹配成功！找到标签页 (ID: ${targetTab.id})，准备触发 diff。`);
+            dispatch(startDiff({ tabId: targetTab.id, suggestion: suggestedContent }));
+        } else {
+            console.warn(`[ChatPanel] 兼容性匹配失败：未找到与路径 '${filePath}' (clean: '${cleanIncomingPath}') 匹配的活动标签页。`);
+        }
+    };
+
+    on('show-diff-preview', handleShowDiffPreview);
+
+    // 在组件卸载时清理监听器
+    return () => {
+        removeListener('show-diff-preview', handleShowDiffPreview);
+    };
+  }, [on, removeListener, dispatch, openTabs]); // 依赖项包括 on, removeListener, dispatch 和 openTabs
+
   useEffect(() => {
     if (isHistoryPanelVisible) {
       loadDeepSeekChatHistory();
     }
   }, [isHistoryPanelVisible, loadDeepSeekChatHistory]);
  
-   // 新增: 当收到文件修改工具调用时，自动触发 diff 视图
-   useEffect(() => {
-    console.log('[DEBUG] Diff trigger effect running. State:', { toolCallState, pendingToolCalls: pendingToolCalls?.length, activeTabId });
-
-  if (toolCallState === 'pending_user_action' && pendingToolCalls?.length > 0 && activeTabId) {
-    // 增强日志：打印出完整的 pendingToolCalls 结构以供调试
-    console.log('[DEBUG] pendingToolCalls content:', JSON.stringify(pendingToolCalls, null, 2));
-
-    const fileModificationCall = pendingToolCalls.find(
-      call => call.toolName === 'write_to_file' || call.toolName === 'apply_diff' || call.toolName === 'insert_content'
-    );
-
-    console.log('[DEBUG] Found file modification call (using toolName):', fileModificationCall);
-
-      if (fileModificationCall) {
-        const targetPath = fileModificationCall.toolArgs.path; // 从解析后的 toolArgs 获取路径
-        console.log(`[DEBUG] Target path: ${targetPath}, Active tab ID: ${activeTabId}`);
-
-        // 确保工具要修改的文件就是当前激活的 tab
-        if (targetPath && activeTab && activeTab.id.endsWith(targetPath)) {
-          let suggestedContent = null;
-          
-          if (fileModificationCall.toolName === 'write_to_file') {
-            suggestedContent = fileModificationCall.toolArgs.content;
-            console.log('[DEBUG] Tool is write_to_file, using provided content.');
-          } else if (fileModificationCall.toolName === 'insert_content') {
-            console.log('[DEBUG] Tool is insert_content, generating preview...');
-            suggestedContent = getInsertContentPreview(activeTab.content, fileModificationCall.toolArgs);
-          } else {
-             // 兼容 apply_diff 等其他可能的情况
-            suggestedContent = fileModificationCall.toolArgs.suggestedContentPreview;
-            console.log('[DEBUG] Tool is other, using suggestedContentPreview.');
-          }
-
-          console.log('[DEBUG] Generated suggested content:', suggestedContent ? `${suggestedContent.substring(0, 50)}...` : 'null');
-
-          if (typeof suggestedContent === 'string') {
-            console.log('[DEBUG] Dispatching startDiff action.');
-            dispatch(startDiff({ tabId: activeTabId, suggestion: suggestedContent }));
-          } else {
-            console.warn('无法触发差异视图：建议内容 (suggestedContent) 未生成、未提供或格式不正确。');
-          }
-        } else {
-          console.warn(`[DEBUG] Mismatch between target path (${targetPath}) and active tab (${activeTabId}). Diff view not triggered.`);
-        }
-      }
-    }
-   }, [pendingToolCalls, toolCallState, activeTab, dispatch]);
+   // 旧的、基于 useEffect 的 diff 触发器已被移除，因为它不可靠。
+   // 新的逻辑由一个专门的 'show-diff-preview' IPC 事件处理器直接触发。
 
   // 新增 useEffect：在设置模态框显示时加载设置
   useEffect(() => {
@@ -611,7 +601,7 @@ const ChatPanel = memo(() => {
         {/* New Tool Action Bar, displayed above the input group */}
         {toolCallState === 'pending_user_action' && (
             <div className="tool-action-bar">
-                <span>AI 请求执行工具，请确认操作：</span>
+                <span>AI 请求执行工具，请确认：</span>
                 <div className="tool-action-buttons">
                     <button
                         className="approve-all-button"

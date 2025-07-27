@@ -4,6 +4,23 @@ const tools = require('../tool-service/tools/definitions');
 const { state } = require('../state-manager');
 const { getFileTree } = require('../utils/file-tree-builder');
 
+const fs = require('fs').promises;
+const path = require('path');
+const { app } = require('electron');
+const isDev = require('electron-is-dev');
+const { MultiSearchReplaceStrategy } = require('../tool-service/diff/multi-search-replace');
+
+// 统一获取 novel 目录路径的辅助函数
+const getNovelPath = () => {
+    if (isDev) {
+        // 开发环境：位于项目根目录
+        return path.join(app.getAppPath(), 'novel');
+    } else {
+        // 生产环境：位于 .exe 文件同级目录
+        return path.join(path.dirname(app.getPath('exe')), 'novel');
+    }
+};
+
 // 服务级别的状态，用于存储持久化设置
 const serviceState = {
     isStreaming: true, // 默认为流式
@@ -227,6 +244,46 @@ async function* chatWithAI(messages, modelId, customSystemPrompt) {
                     toolArgs = { "error": "failed to parse arguments", "raw_arguments": toolCall.function.arguments };
                 }
 
+                // ================== 新增：apply_diff 预处理逻辑 ==================
+                if (toolCall.function.name === 'apply_diff' && toolArgs.path && toolArgs.diff) {
+                    try {
+                        const novelRootDir = getNovelPath();
+                        let cleanFilePath = toolArgs.path;
+                         if (cleanFilePath.startsWith('novel/') || cleanFilePath.startsWith('novel\\')) {
+                            cleanFilePath = cleanFilePath.substring('novel/'.length);
+                        }
+                        const fullPath = path.join(novelRootDir, cleanFilePath);
+                        
+                        const originalContent = await fs.readFile(fullPath, 'utf-8');
+                        const strategy = new MultiSearchReplaceStrategy(0.9);
+                        const result = await strategy.applyDiff(originalContent, toolArgs.diff);
+
+                        if (result.success) {
+                            toolArgs.suggestedContentPreview = result.content;
+                             console.log(`[ChatService] 成功为 apply_diff 预计算了预览内容。路径: ${toolArgs.path}`);
+                            
+                            // ================== 新增：发送专用的预览事件 ==================
+                            if (state.mainWindow) {
+                                // 确保发送给前端的路径总是以 'novel/' 开头
+                                const frontendPath = toolArgs.path.startsWith('novel/') ? toolArgs.path : `novel/${toolArgs.path}`;
+                                state.mainWindow.webContents.send('show-diff-preview', {
+                                    filePath: frontendPath,
+                                    originalContent: originalContent,
+                                    suggestedContent: result.content
+                                });
+                                console.log(`[ChatService] 已发送 show-diff-preview 顶级事件，路径: ${frontendPath}`);
+                            }
+                            // ==========================================================
+
+                        } else {
+                            console.warn(`[ChatService] 为 apply_diff 预计算预览内容失败: ${result.error}`);
+                        }
+                    } catch (previewError) {
+                        console.error(`[ChatService] 在为 apply_diff 生成预览时发生异常: ${previewError.message}`);
+                    }
+                }
+                // ===============================================================
+
                 newPendingToolCalls.push({
                     toolCallId: toolCall.id,
                     toolName: toolCall.function.name,
@@ -395,6 +452,44 @@ async function* sendToolResultToAI(toolResultsArray, modelId) {
                     console.error(`[ChatService] 解析工具参数失败: ${e.message}`);
                     toolArgs = { "error": "failed to parse arguments", "raw_arguments": toolCall.function.arguments };
                 }
+                
+                // ================== 新增：apply_diff 预处理逻辑 ==================
+                if (toolCall.function.name === 'apply_diff' && toolArgs.path && toolArgs.diff) {
+                    try {
+                        const novelRootDir = getNovelPath();
+                        let cleanFilePath = toolArgs.path;
+                         if (cleanFilePath.startsWith('novel/') || cleanFilePath.startsWith('novel\\')) {
+                            cleanFilePath = cleanFilePath.substring('novel/'.length);
+                        }
+                        const fullPath = path.join(novelRootDir, cleanFilePath);
+                        
+                        const originalContent = await fs.readFile(fullPath, 'utf-8');
+                        const strategy = new MultiSearchReplaceStrategy(0.9);
+                        const result = await strategy.applyDiff(originalContent, toolArgs.diff);
+
+                        if (result.success) {
+                            toolArgs.suggestedContentPreview = result.content;
+                             console.log(`[ChatService] 成功为 apply_diff 预计算了预览内容。路径: ${toolArgs.path}`);
+
+                            // ================== 新增：发送专用的预览事件 ==================
+                            if (state.mainWindow) {
+                                state.mainWindow.webContents.send('show-diff-preview', {
+                                    filePath: toolArgs.path,
+                                    originalContent: originalContent,
+                                    suggestedContent: result.content
+                                });
+                                console.log(`[ChatService] 已发送 show-diff-preview 顶级事件。`);
+                            }
+                            // ==========================================================
+
+                        } else {
+                            console.warn(`[ChatService] 为 apply_diff 预计算预览内容失败: ${result.error}`);
+                        }
+                    } catch (previewError) {
+                        console.error(`[ChatService] 在为 apply_diff 生成预览时发生异常: ${previewError.message}`);
+                    }
+                }
+                // ===============================================================
 
                 newPendingToolCalls.push({
                     toolCallId: toolCall.id,
