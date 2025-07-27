@@ -244,7 +244,6 @@ function ChapterTreePanel() {
         setNotificationMessage(result.message);
         setShowNotificationModal(true);
         fetchChapters(); // 刷新章节列表
-        invoke('trigger-focus-fix'); // 触发主进程的焦点修复
       } else {
         setNotificationMessage(`操作失败: ${result.error}`);
         setShowNotificationModal(true);

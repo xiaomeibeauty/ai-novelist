@@ -15,14 +15,13 @@
     padding: 10px;
     background-color: #333333; /* 聊天区背景色 */
     border-bottom: 1px solid #444444; /* 底部边框 */
-    position: relative; /* 为内部的绝对定位按钮提供参考 */
 }
 
 /* 重置聊天按钮样式 */
 .reset-chat-button {
     position: absolute;
-    top: 5px; /* 距离顶部 */
-    right: 5px; /* 距离右侧 */
+    top: 70px; /* 距离顶部 */
+    right: 10px; /* 距离右侧 */
     background-color: var(--panel-bg-color-alt); /* 改为深灰色系 */
     color: white;
     border: none;
@@ -777,3 +776,51 @@ input:checked + .slider:before {
 }
 
 /* Styles for .ai-question-input-area, .ai-question-input, and .ai-question-send-button have been removed as this functionality is now handled by the main chat input. */
+
+@keyframes fa-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.message-content .fa-spin {
+  animation: fa-spin 1s infinite linear;
+}
+.message .message-actions {
+  opacity: 0;
+  transition: opacity 0.3s, height 0.3s;
+  display: flex;
+  gap: 5px;
+  justify-content: flex-end; /* Align buttons to the right */
+  padding-top: 5px; /* Add some space between content and buttons */
+  height: 0; /* Collapse by default */
+  overflow: hidden; /* Hide the buttons when collapsed */
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+  height: auto; /* Expand to fit content on hover */
+  padding-bottom: 5px; /* Add some space below the buttons */
+}
+
+.message-actions button {
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px 5px;
+}
+
+.message-actions button:hover {
+  background: #e0e0e0;
+}
+
+.message-content textarea {
+  width: 100%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 5px;
+}

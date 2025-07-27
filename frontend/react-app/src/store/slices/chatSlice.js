@@ -55,19 +55,37 @@ const chatSlice = createSlice({
     availableModels: [], // 新增：用于存储所有可用模型列表
     customSystemPrompt: DEFAULT_SYSTEM_PROMPT, // 新增：自定义系统提示词
     enableStream: true, // 新增：是否启用流式传输，默认为 true
+    editingMessageId: null, // 新增：用于跟踪正在编辑的消息ID
   },
   reducers: {
-    appendMessage: (state, action) => {
-      // 此 reducer 通常用于用户消息等直接追加的场景
-      // 对于 AI 消息，应该主要通过 ipcAiResponseReceived 处理
-      if (action.payload.reasoning_content) {
-        state.messages.push({
-          ...action.payload,
-          reasoning_content: action.payload.reasoning_content
-        });
-      } else {
-        state.messages.push(action.payload);
+    deleteMessage: (state, action) => {
+      const { messageId } = action.payload;
+      const messageIndex = state.messages.findIndex(msg => msg.id === messageId);
+      if (messageIndex !== -1) {
+        // Remove the message and all subsequent messages
+        state.messages.splice(messageIndex);
       }
+    },
+    startEditing: (state, action) => {
+      const { messageId } = action.payload;
+      state.editingMessageId = messageId;
+    },
+    // submitEdit: (state, action) => {
+    //   const { messageId, newContent } = action.payload;
+    //   const message = state.messages.find(msg => msg.id === messageId);
+    //   if (message) {
+    //     message.content = newContent;
+    //     message.text = newContent; // 确保 text 和 content 同步
+    //   }
+    //   state.editingMessageId = null;
+    // },
+    appendMessage: (state, action) => {
+      const message = action.payload;
+      // Ensure every message has a unique ID
+      if (!message.id) {
+        message.id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      }
+      state.messages.push(message);
     },
     setQuestionCard: (state, action) => {
       state.questionCard = action.payload;
@@ -360,7 +378,15 @@ const chatSlice = createSlice({
             case 'tool_action_status':
             case 'tool_execution_status':
                 // 统一处理工具状态更新
-                currentMessages.push({ sender: 'System', text: `工具 ${payload.toolName} 执行${payload.success ? '成功' : '失败'}：${payload.message}`, className: 'system-message', sessionId: payload.sessionId });
+                const messageText = `工具 ${payload.toolName} 执行${payload.success ? '成功' : '失败'}：${payload.message}`;
+                currentMessages.push({
+                    sender: 'System',
+                    text: messageText,
+                    role: 'system',
+                    content: messageText,
+                    className: 'system-message',
+                    sessionId: payload.sessionId,
+                });
                 // 状态更新逻辑可能需要调整，但暂时保持不变
                 break;
             case 'batch_action_status':
@@ -414,6 +440,9 @@ export const {
   setCustomSystemPrompt, // 新增：导出 setCustomSystemPrompt
   resetCustomSystemPrompt, // 新增：导出 resetCustomSystemPrompt
   setEnableStream, // 新增：导出 setEnableStream
+  deleteMessage,
+  startEditing,
+  // submitEdit,
 } = chatSlice.actions;
 
 export { DEFAULT_SYSTEM_PROMPT }; // 导出默认提示词

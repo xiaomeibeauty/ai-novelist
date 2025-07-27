@@ -54,10 +54,8 @@ async function performToolExecution(toolCallId, toolName, toolArgs, mainWindow) 
             if (toolName === "write_file") {
                 const chapterId = toolArgs.path; // 直接使用 path 作为 chapterId
                 logger.writeLog(`[executor.js] 接收到 write_file 操作，文件名为: ${chapterId}`);
-                mainWindow.webContents.send('update-novel-content', toolArgs.content);
-                logger.writeLog(`[executor.js] 发送 update-novel-content 事件`);
-                mainWindow.webContents.send('update-current-file', chapterId);
-                logger.writeLog(`[executor.js] 发送 update-current-file 事件`);
+                mainWindow.webContents.send('file-written', { filePath: toolArgs.path, content: toolArgs.content });
+                logger.writeLog(`[executor.js] 发送 file-written 事件`);
                 finalMessage = `章节 '${chapterId}' 已创建/更新，并已加载到编辑框。`;
             } else if (toolName === "read_file") {
                 mainWindow.webContents.send('update-novel-content', toolResult.content);

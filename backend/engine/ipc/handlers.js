@@ -311,104 +311,8 @@ const handleSendBatchToolResults = async (event, processedTools) => {
 
 // 处理用户命令
 const handleProcessCommand = async (event, { message, sessionId, currentMessages }) => {
-    // state.isStreaming is now controlled by the 'set-streaming-mode' event.
-    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}", Current service streaming state: ${chatService.getStreamingMode()}`);
-
-    // ================== 历史存档：首次存档 ==================
-    try {
-        const { workspaceDir, shadowDir } = await getCheckpointDirs();
-        // 假设 taskId 是从 sessionId 派生的，或者是一个全局/会话级变量
-        const taskId = sessionId || 'default-task';
-        const history = await checkpointService.getHistory(taskId, workspaceDir, shadowDir);
-        if (!history || history.length === 0) {
-            const savedCheckpoint = await checkpointService.saveCheckpoint(taskId, workspaceDir, shadowDir, 'Initial state');
-            console.log(`[handlers.js] Initial checkpoint saved for task: ${taskId}`);
-            if (savedCheckpoint && savedCheckpoint.commit) {
-                // 首次存档也发送一个带checkpointId的消息给前端
-                chatService._sendAiResponseToFrontend('system-message', {
-                    text: `任务已初始化，初始存档已创建。`,
-                    checkpointId: savedCheckpoint.commit,
-                    id: `checkpoint-${savedCheckpoint.commit}-${Date.now()}`
-                });
-            }
-        }
-    } catch (error) {
-        console.error('[handlers.js] Error during initial checkpoint save:', error);
-    }
-    // ========================================================
-    
-    // **关键修复**: 不再从磁盘加载历史记录。完全信任并使用从前端传递的 `currentMessages`。
-    // 这确保了后端的状态与前端 UI 完全同步。
-    state.conversationHistory = currentMessages;
-    
-    // 追加最新的用户消息
-    const latestMessage = { role: 'user', content: message, sessionId: sessionId };
-    state.conversationHistory.push(latestMessage);
-    
-    // 重置相关状态
-    state.pendingToolCalls = [];
-    chatService.resetResponseCount();
-    
-    // 获取模型和系统提示词
-    if (!storeInstance) {
-        const StoreModule = await import('electron-store');
-        const Store = StoreModule.default;
-        storeInstance = new Store();
-    }
-    const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
-    const customSystemPrompt = storeInstance.get('customSystemPrompt');
- 
-    // **关键修复**: 构建要发送给 AI 的消息数组，确保包含系统提示词和同步后的历史
-    // **关键修复**: 在将历史记录发送到 chatService 之前，进行严格过滤，
-    // 移除任何没有 'role' 或 'content'/'tool_calls' 的无效消息。
-    // 这可以防止被污染的前端状态破坏后端调用。
-    // 同时，移除不安全的 .map() 重构，直接使用过滤后的历史记录。
-    const validHistory = state.conversationHistory.filter(msg =>
-        msg && msg.role && (msg.content || msg.tool_calls)
-    );
-
-    const messagesToSend = [
-        // System prompt is now handled inside chatService. We pass the full valid history.
-        ...validHistory
-    ];
- 
-    try {
-        // **关键重构**: 统一流式和非流式处理逻辑
-        // 因为 chatService 现在总是返回一个生成器，我们可以用同一个循环来处理
-        // **关键重构**: chatService 现在从其内部状态获取流式设置
-        const stream = chatService.chatWithAI(messagesToSend, defaultModelId, customSystemPrompt);
-        for await (const chunk of stream) {
-            if (chunk.type === 'text') {
-                if (chatService.getStreamingMode()) {
-                    chatService._sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: sessionId });
-                } else {
-                    // 非流式模式，发送一个完整的 text 事件
-                    chatService._sendAiResponseToFrontend('text', { content: chunk.content, sessionId: sessionId });
-                }
-            } else if (chunk.type === 'tool_calls' && chunk.content) {
-                 if (chatService.getStreamingMode()) {
-                    // 流式模式：拆分工具调用块并逐个发送
-                    for (const delta of chunk.content) {
-                        chatService._sendAiResponseToFrontend('tool_stream', [delta]);
-                        await new Promise(resolve => setTimeout(resolve, 10));
-                    }
-                } else {
-                    // 非流式模式：直接发送完整的 tool_suggestions
-                    // 注意: state.pendingToolCalls 此时应已在 chatService 中被填充完毕
-                    chatService._sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
-                }
-            } else if (chunk.type === 'end_task_processed' || chunk.type === 'ask_user_question_processed' || chunk.type === 'pending_tools' || chunk.type === 'processed' || chunk.type === 'error') {
-                // 这些是生成器结束时的状态，可以忽略，因为相关 IPC 消息已经在 chatService 内部发送
-            }
-        }
-        // 仅在流式模式下才需要发送流结束信号
-        if (chatService.getStreamingMode()) {
-            chatService._sendAiResponseToFrontend('text_stream_end', null);
-        }
-    } catch (error) {
-        console.error('调用聊天服务失败:', error);
-        chatService._sendAiResponseToFrontend('error', `调用聊天服务失败: ${error.message}`);
-    }
+    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}"`);
+    await chatService.processUserMessage(message, sessionId, currentMessages);
 };
  
 // 新的、修复后的用户问题回复处理器
@@ -969,6 +873,26 @@ function register(store) { // 添加 store 参数
   ipcMain.handle('delete-ai-chat-history', handleDeleteAiChatHistory); // 修改 IPC 处理器名称
   ipcMain.handle('clear-ai-conversation', handleClearAiConversation); // 修改 IPC 处理器名称
   ipcMain.handle('list-all-models', handleListAllModels); // 新增：注册获取所有模型列表处理器
+
+  // ipcMain.handle('regenerate-response', async (event, { messageId }) => {
+  //   try {
+  //     await chatService.regenerateResponse(messageId);
+  //     return { success: true };
+  //   } catch (error) {
+  //     console.error('IPC Error in regenerate-response:', error);
+  //     return { success: false, error: error.message };
+  //   }
+  // });
+
+  // ipcMain.handle('edit-message', async (event, { messageId, newContent }) => {
+  //   try {
+  //     await chatService.editMessage(messageId, newContent);
+  //     return { success: true };
+  //   } catch (error) {
+  //     console.error('IPC Error in edit-message:', error);
+  //     return { success: false, error: error.message };
+  //   }
+  // });
   
   // Checkpoint Service Handlers
   ipcMain.handle('checkpoints:save', async (event, { taskId, message }) => {

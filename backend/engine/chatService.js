@@ -428,11 +428,93 @@ async function* sendToolResultToAI(toolResultsArray, modelId) {
     }
 }
 
+async function processUserMessage(message, sessionId, currentMessages) {
+    // This function will contain the core logic from handleProcessCommand
+    state.conversationHistory = currentMessages || [];
+    
+    // Append the latest user message if it's not already there
+    if (!state.conversationHistory.some(msg => msg.content === message && msg.role === 'user')) {
+        const latestMessage = { role: 'user', content: message, sessionId: sessionId, id: `${Date.now()}` };
+        state.conversationHistory.push(latestMessage);
+    }
+    
+    state.pendingToolCalls = [];
+    resetResponseCount();
+    
+    const storeModule = await import('electron-store');
+    const store = new storeModule.default();
+    const defaultModelId = store.get('defaultAiModel') || 'deepseek-chat';
+    const customSystemPrompt = store.get('customSystemPrompt');
+
+    const validHistory = state.conversationHistory.filter(msg =>
+        msg && msg.role && (msg.content || msg.tool_calls)
+    );
+
+    try {
+        const stream = chatWithAI(validHistory, defaultModelId, customSystemPrompt);
+        for await (const chunk of stream) {
+            if (chunk.type === 'text') {
+                if (getStreamingMode()) {
+                    _sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: sessionId });
+                } else {
+                    _sendAiResponseToFrontend('text', { content: chunk.content, sessionId: sessionId });
+                }
+            } else if (chunk.type === 'tool_calls' && chunk.content) {
+                 if (getStreamingMode()) {
+                    for (const delta of chunk.content) {
+                        _sendAiResponseToFrontend('tool_stream', [delta]);
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                } else {
+                    _sendAiResponseToFrontend('tool_suggestions', state.pendingToolCalls);
+                }
+            }
+        }
+        if (getStreamingMode()) {
+            _sendAiResponseToFrontend('text_stream_end', null);
+        }
+    } catch (error) {
+        console.error('调用聊天服务失败:', error);
+        _sendAiResponseToFrontend('error', `调用聊天服务失败: ${error.message}`);
+    }
+}
+
+// async function regenerateResponse(messageId) {
+//     const messageIndex = state.conversationHistory.findIndex(msg => msg.id === messageId);
+//     if (messageIndex === -1) return;
+//
+//     // We assume the message to regenerate is an AI response, so we remove it and all subsequent messages.
+//     // The last user message before it will be used to trigger a new response.
+//     state.conversationHistory.splice(messageIndex);
+//
+//     const lastUserMessage = [...state.conversationHistory].reverse().find(m => m.role === 'user');
+//     if (!lastUserMessage) return;
+//
+//     await processUserMessage(lastUserMessage.content, lastUserMessage.sessionId, state.conversationHistory);
+// }
+
+// async function editMessage(messageId, newContent) {
+//     const messageIndex = state.conversationHistory.findIndex(msg => msg.id === messageId);
+//     if (messageIndex === -1) return;
+
+//     state.conversationHistory[messageIndex].content = newContent;
+//     state.conversationHistory[messageIndex].text = newContent;
+
+//     state.conversationHistory.splice(messageIndex + 1);
+
+//     const lastMessage = state.conversationHistory[state.conversationHistory.length - 1];
+//     await processUserMessage(lastMessage.content, lastMessage.sessionId, state.conversationHistory);
+// }
+
+
 module.exports = {
     chatWithAI,
     sendToolResultToAI,
     resetResponseCount,
     _sendAiResponseToFrontend,
     setStreamingMode,
-    getStreamingMode // 导出 getter
+    getStreamingMode, // 导出 getter
+    // regenerateResponse,
+    // editMessage,
+    processUserMessage,
 };

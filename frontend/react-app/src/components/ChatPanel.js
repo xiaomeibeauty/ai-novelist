@@ -18,6 +18,8 @@ import {
   setEnableStream, // 新增
   approveToolCalls,
   rejectToolCalls,
+  deleteMessage,
+  startEditing,
 } from '../store/slices/chatSlice';
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
 import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
@@ -28,7 +30,7 @@ import NotificationModal from './NotificationModal';
 import ConfirmationModal from './ConfirmationModal';
 import './ChatPanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive } from '@fortawesome/free-solid-svg-icons';
+import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil } from '@fortawesome/free-solid-svg-icons';
 import CustomProviderSettings from './CustomProviderSettings'; // 新增
 
 // 辅助函数：根据 insert_content 参数生成预览文本
@@ -68,7 +70,8 @@ const ChatPanel = memo(() => {
     selectedModel,
     availableModels,
     customSystemPrompt,
-    enableStream
+    enableStream,
+    editingMessageId,
   } = useSelector((state) => state.chat);
 
   // 从 novel slice 获取状态
@@ -83,6 +86,7 @@ const ChatPanel = memo(() => {
   const [onCancelCallback, setOnCancelCallback] = useState(null);
   const [selectedProvider, setSelectedProvider] = useState('deepseek'); // 默认选择 DeepSeek
   const [notification, setNotification] = useState({ show: false, message: '' });
+  const [editingText, setEditingText] = useState('');
 
   const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send } = useIpcRenderer();
   // 将 loadSettings 定义为 useCallback，确保其稳定性
@@ -466,8 +470,8 @@ const ChatPanel = memo(() => {
           </button>
         </div>
 
+        <button className="reset-chat-button" onClick={handleResetChat}>×</button>
         <div id="chatDisplay" ref={chatDisplayRef}>
-          <button className="reset-chat-button" onClick={handleResetChat}>×</button>
           {messages.map((msg, index) => (
             <div key={msg.id || index} className={`message ${msg.role === 'user' ? 'user' : msg.role === 'assistant' ? 'ai' : msg.role} ${msg.className || ''}`}>
               {msg.role === 'tool' && msg.checkpointId ? ( // 这是一个可回溯的存档点消息
@@ -515,12 +519,78 @@ const ChatPanel = memo(() => {
                   <div className={`message-content ${msg.toolCalls && msg.toolCalls.length > 0 ? 'is-tool-call' : ''}`}>
                     {msg.isLoading ? <FontAwesomeIcon icon={faSpinner} spin /> : (msg.content || msg.text || '[消息内容缺失]')}
                   </div>
+                  <div className="message-actions">
+                    <button title="复制" onClick={() => {
+                      navigator.clipboard.writeText(msg.content);
+                      setNotification({ show: true, message: '复制成功' });
+                    }}><FontAwesomeIcon icon={faCopy} /></button>
+                    {/* <button title="重新生成" onClick={() => invoke('regenerate-response', { messageId: msg.id })}><FontAwesomeIcon icon={faRedo} /></button> */}
+                    <button title="删除" onClick={() => {
+                      setConfirmationMessage('确定删除吗，这将会导致后续所有内容丢失！');
+                      setOnConfirmCallback(() => () => {
+                        dispatch(deleteMessage({ messageId: msg.id }));
+                        setShowConfirmationModal(false);
+                      });
+                      setOnCancelCallback(() => () => setShowConfirmationModal(false));
+                      setShowConfirmationModal(true);
+                    }}><FontAwesomeIcon icon={faTrashCan} /></button>
+                  </div>
                 </>
+              ) : msg.role === 'system' ? ( // 系统消息 (包括错误、警告等)
+               <>
+                 <div className="message-header">系统:</div>
+                 <div className="message-content">
+                   {msg.content || msg.text || '[消息内容缺失]'}
+                 </div>
+               </>
               ) : ( // 用户消息 (msg.role === 'user')
                 <>
                   <div className="message-header">用户:</div>
                   <div className="message-content">
-                    {msg.content || msg.text || '[消息内容缺失]'}
+                    {/* {editingMessageId === msg.id ? (
+                      <div>
+                        <textarea
+                          value={editingText}
+                          onChange={(e) => setEditingText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              dispatch(submitEdit({ messageId: msg.id, newContent: editingText }));
+                              invoke('edit-message', { messageId: msg.id, newContent: editingText });
+                            } else if (e.key === 'Escape') {
+                              dispatch(startEditing({ messageId: null }));
+                            }
+                          }}
+                          rows={3}
+                        />
+                        <button onClick={() => {
+                          dispatch(submitEdit({ messageId: msg.id, newContent: editingText }));
+                          invoke('edit-message', { messageId: msg.id, newContent: editingText });
+                        }}>保存</button>
+                        <button onClick={() => dispatch(startEditing({ messageId: null }))}>取消</button>
+                      </div>
+                    ) : ( */}
+                      {msg.content || msg.text || '[消息内容缺失]'}
+                    {/* )} */}
+                  </div>
+                  <div className="message-actions">
+                    <button title="复制" onClick={() => {
+                        navigator.clipboard.writeText(msg.content);
+                        setNotification({ show: true, message: '复制成功' });
+                    }}><FontAwesomeIcon icon={faCopy} /></button>
+                    {/* <button title="编辑" onClick={() => {
+                      dispatch(startEditing({ messageId: msg.id }));
+                      setEditingText(msg.content);
+                    }}><FontAwesomeIcon icon={faPencil} /></button> */}
+                    <button title="删除" onClick={() => {
+                      setConfirmationMessage('确定删除吗，这将会导致后续所有内容丢失！');
+                      setOnConfirmCallback(() => () => {
+                        dispatch(deleteMessage({ messageId: msg.id }));
+                        setShowConfirmationModal(false);
+                      });
+                      setOnCancelCallback(() => () => setShowConfirmationModal(false));
+                      setShowConfirmationModal(true);
+                    }}><FontAwesomeIcon icon={faTrashCan} /></button>
                   </div>
                 </>
               )}
@@ -701,7 +771,8 @@ const ChatPanel = memo(() => {
              </button>
            </div>
 
-           {/* 流式传输开关 */}
+           {/*
+            // 流式传输开关
            <div className="setting-item">
              <label htmlFor="streamToggle">启用流式传输:</label>
              <label className="switch">
@@ -714,6 +785,7 @@ const ChatPanel = memo(() => {
                <span className="slider round"></span>
              </label>
            </div>
+           */}
 
            <div className="modal-actions">
              <button onClick={handleSaveSettings} className="save-button">保存</button>

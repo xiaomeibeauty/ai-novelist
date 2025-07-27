@@ -61,6 +61,7 @@
   flex-direction: row;
   flex-grow: 1;
   overflow: hidden; /* 确保子元素滚动 */
+  min-height: 0; /* 修复 flex 子元素溢出问题 */
 }
 
 .line-numbers-gutter {
@@ -77,6 +78,12 @@
   overflow: hidden; /* 隐藏自身的滚动条 */
   position: relative; /* 为了定位子元素 */
   border-right: 1px solid var(--border-color);
+}
+
+.line-number-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 .line-number {
@@ -133,6 +140,7 @@
 .context-menu-item.disabled:hover {
     background-color: var(--panel-bg-color-alt); /* 禁用状态下悬停无变化 */
 }
+
 
 /* 未选择文件时的面板样式 */
 .no-file-selected-panel {

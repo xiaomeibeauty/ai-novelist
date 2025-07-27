@@ -343,9 +343,6 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
       case 'insert':
         console.log('Insert clicked (functionality not yet implemented)');
         break;
-      case 'selectAll':
-        editor.commands.selectAll();
-        break;
       default:
         break;
     }
@@ -425,11 +422,13 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
             <>
               <div className="editor-container">
                 <div className="line-numbers-gutter" ref={lineNumbersRef}>
-                  {paragraphs.map((p, index) => (
-                    <div key={index} className="line-number" style={{ top: `${p.top}px` }}>
-                      {index + 1}
-                    </div>
-                  ))}
+                  <div className="line-number-container">
+                    {paragraphs.map((p, index) => (
+                      <div key={index} className="line-number" style={{ top: `${p.top}px` }}>
+                        {index + 1}
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div
                   ref={editorRef}
@@ -437,8 +436,9 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
                   onContextMenu={handleContextMenu}
                   onClick={handleEditorClick}
                   onScroll={(e) => {
-                    if (lineNumbersRef.current) {
-                      lineNumbersRef.current.scrollTop = e.target.scrollTop;
+                    const container = lineNumbersRef.current?.querySelector('.line-number-container');
+                    if (container) {
+                      container.style.transform = `translateY(-${e.target.scrollTop}px)`;
                     }
                   }}
                 ></div>
@@ -448,7 +448,24 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
                   className="context-menu"
                   style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
                 >
-                  {/* Context menu items... */}
+                  <div
+                    className={`context-menu-item ${!isSelectionActive ? 'disabled' : ''}`}
+                    onClick={() => isSelectionActive && handleMenuItemClick('cut')}
+                  >
+                    剪切
+                  </div>
+                  <div
+                    className={`context-menu-item ${!isSelectionActive ? 'disabled' : ''}`}
+                    onClick={() => isSelectionActive && handleMenuItemClick('copy')}
+                  >
+                    复制
+                  </div>
+                  <div
+                    className="context-menu-item"
+                    onClick={() => handleMenuItemClick('paste')}
+                  >
+                    粘贴
+                  </div>
                 </div>
               )}
             </>

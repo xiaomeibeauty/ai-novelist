@@ -174,6 +174,37 @@ const novelSlice = createSlice({
             console.log(`[novelSlice] Tab '${filePath}' content synced and view mode reset.`);
         }
     },
+    // 新增：用于处理后端 `write_file` 工具执行后的文件写入事件
+    fileWritten: (state, action) => {
+      const { filePath, content } = action.payload;
+      const cleanFilePath = filePath.startsWith('novel/') ? filePath.substring(6) : filePath;
+      const existingTab = state.openTabs.find(tab => tab.id === cleanFilePath);
+
+      if (existingTab) {
+        // 如果标签页已存在，更新内容
+        existingTab.content = content;
+        existingTab.isDirty = false; // 刚从后端写入，认为是干净的
+        existingTab.originalContent = content; // 同步原始内容
+        existingTab.suggestedContent = null;
+        existingTab.viewMode = 'edit';
+      } else {
+        // 如果是新文件，创建新标签页
+        const newTab = {
+          id: cleanFilePath,
+          title: cleanFilePath.replace(/\.txt$/, ''),
+          content: content,
+          originalContent: content,
+          suggestedContent: null,
+          isDirty: false,
+          viewMode: 'edit',
+        };
+        state.openTabs.push(newTab);
+        state.activeTabId = cleanFilePath; // 自动切换到新文件
+      }
+      
+      // 触发章节列表刷新
+      state.refreshCounter += 1;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -264,6 +295,7 @@ export const {
   rejectSuggestion,
   setChapters,
   triggerChapterRefresh,
-  syncFileContent, // 导出新 action
+  syncFileContent,
+  fileWritten,
 } = novelSlice.actions;
 export default novelSlice.reducer;
