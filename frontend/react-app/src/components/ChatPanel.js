@@ -20,6 +20,7 @@ import {
   rejectToolCalls,
   deleteMessage,
   startEditing,
+  restoreMessages, // <--- 导入新的 action
 } from '../store/slices/chatSlice';
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
 import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
@@ -32,6 +33,41 @@ import './ChatPanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil } from '@fortawesome/free-solid-svg-icons';
 import CustomProviderSettings from './CustomProviderSettings'; // 新增
+
+// 新增：可重用的工具调用渲染组件
+const ToolCallCard = ({ toolCall }) => {
+  // 确保 toolCall 和其属性是存在的，避免运行时错误
+  const toolName = toolCall?.function?.name || '未知工具';
+  const toolArgs = toolCall?.toolArgs || {};
+  const status = toolCall?.status;
+  const isHistorical = status === 'historical';
+
+  // 根据工具名称生成可读的标题
+  const getToolDisplayName = (name) => {
+    const nameMap = {
+      'write_file': '写入文件',
+      'ask_user_question': '提问',
+      'end_task': '结束任务',
+      'apply_diff': '应用差异',
+      'insert_content': '插入内容',
+    };
+    return nameMap[name] || name;
+  };
+
+  return (
+    <div className={`tool-call-card ${isHistorical ? 'historical' : ''}`}>
+      <div className="tool-call-header">
+        <FontAwesomeIcon icon={faBoxArchive} className="tool-icon" />
+        <span className="tool-name">{getToolDisplayName(toolName)}</span>
+        {isHistorical && <span className="historical-badge">历史记录</span>}
+      </div>
+      <pre className="tool-args">
+        {JSON.stringify(toolArgs, null, 2)}
+      </pre>
+    </div>
+  );
+};
+
 
 // 辅助函数：根据 insert_content 参数生成预览文本
 const getInsertContentPreview = (currentContent, { paragraph, content: textToInsert }) => {
@@ -348,7 +384,8 @@ const ChatPanel = memo(() => {
     try {
       const conversation = deepSeekHistory.find(conv => conv.sessionId === sessionId);
       if (conversation) {
-        dispatch(setMessages(conversation.messages));
+        // **关键修改**: 使用 restoreMessages 来重构历史会话的UI状态
+        dispatch(restoreMessages(conversation.messages));
         currentSessionIdRef.current = sessionId;
         dispatch(setIsHistoryPanelVisible(false));
       }
@@ -464,33 +501,36 @@ const ChatPanel = memo(() => {
         <div id="chatDisplay" ref={chatDisplayRef}>
           {messages.map((msg, index) => (
             <div key={msg.id || index} className={`message ${msg.role === 'user' ? 'user' : msg.role === 'assistant' ? 'ai' : msg.role} ${msg.className || ''}`}>
-              {msg.role === 'tool' && msg.checkpointId ? ( // 这是一个可回溯的存档点消息
+              {msg.role === 'system' && msg.checkpointId ? ( // 这是一个可回溯的存档点消息
                 <div className="checkpoint-message">
                   <button
                     className="checkpoint-restore-button"
-                    onClick={async () => {
-                      // 假设 taskId 可以从 sessionId 获得
-                      const taskId = msg.sessionId || currentSessionIdRef.current || 'default-task';
-                      console.log(`Restoring checkpoint ${msg.checkpointId} for task ${taskId}...`);
-                      // The new restore function takes an archiveId, which is what msg.checkpointId represents now.
-                      // Let's also add the user confirmation dialog here for consistency.
-                      if (window.confirm(`当前操作可能使得内容丢失，请提前存档。\n\n确定要恢复到这个存档点吗？`)) {
-                          const result = await restoreNovelArchive(taskId, msg.checkpointId);
-                          if (result.success) {
-                            alert('恢复成功！应用将刷新以加载新内容。');
-                            window.location.reload();
-                          } else {
-                            setNotification({ show: true, message: `恢复失败: ${result.error}` });
+                    onClick={() => {
+                      setConfirmationMessage('是否回档，后续内容将会清空！');
+                      setOnConfirmCallback(() => async () => {
+                        const taskId = msg.sessionId || currentSessionIdRef.current || 'default-task';
+                        console.log(`Restoring checkpoint ${msg.checkpointId} for task ${taskId}...`);
+                        const result = await restoreNovelArchive(taskId, msg.checkpointId);
+                        if (result.success) {
+                          // **关键修复**: 调用新的 restoreMessages action 来重构历史状态
+                          if (result.messages) {
+                            dispatch(restoreMessages(result.messages));
                           }
-                      }
+                          setNotification({ show: true, message: '回档成功！聊天记录已恢复。' });
+                        } else {
+                          setNotification({ show: true, message: `恢复失败: ${result.error || '未知错误'}` });
+                        }
+                        setShowConfirmationModal(false);
+                      });
+                      setOnCancelCallback(() => () => setShowConfirmationModal(false));
+                      setShowConfirmationModal(true);
                     }}
                   >
-                    <FontAwesomeIcon icon={faBoxArchive} />
-                    <span>版本已存档 (点击恢复至此刻)</span>
+                    <FontAwesomeIcon icon={faClock} />
                   </button>
                   <span className="checkpoint-id-display">ID: {msg.checkpointId.substring(0, 7)}</span>
                 </div>
-              ) : msg.role === 'tool' ? ( // 普通系统消息
+              ) : msg.role === 'system' ? ( // 普通系统消息
                 <>
                   <div className="message-header">系统: {msg.name ? `${msg.name}` : ''}</div>
                   <div className="message-content">
@@ -506,9 +546,28 @@ const ChatPanel = memo(() => {
                       <pre className="reasoning-content">{msg.reasoning_content}</pre>
                     </details>
                   )}
-                  <div className={`message-content ${msg.toolCalls && msg.toolCalls.length > 0 ? 'is-tool-call' : ''}`}>
-                    {msg.isLoading ? <FontAwesomeIcon icon={faSpinner} spin /> : (msg.content || msg.text || '[消息内容缺失]')}
+
+                  {/* 工具调用现在置顶在消息内容之上 */}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <details className="tool-call-details">
+                      <summary className="tool-call-summary">
+                        {msg.isLoading ? <FontAwesomeIcon icon={faSpinner} spin className="ai-typing-spinner" /> : null}
+                        请求调用工具
+                      </summary>
+                      <div className="tool-calls-container">
+                        {msg.toolCalls.map((toolCall, i) => (
+                          <ToolCallCard key={toolCall.id || i} toolCall={toolCall} />
+                        ))}
+                      </div>
+                    </details>
+                  )}
+
+                  <div className="message-content">
+                      {/* 如果没有工具调用，则在文本流式传输时显示加载图标 */}
+                      {msg.isLoading && (!msg.toolCalls || msg.toolCalls.length === 0) && <FontAwesomeIcon icon={faSpinner} spin className="ai-typing-spinner" />}
+                      <span>{msg.content || msg.text}</span>
                   </div>
+                  
                   <div className="message-actions">
                     <button title="复制" onClick={() => {
                       navigator.clipboard.writeText(msg.content);

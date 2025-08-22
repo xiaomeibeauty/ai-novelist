@@ -205,6 +205,7 @@ const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
                 state.mainWindow,
                 serviceRegistry.toolService
             );
+
             toolToProcess.status = executionResult.result.success ? 'executed' : 'failed';
             toolToProcess.result = executionResult.result;
 
@@ -219,7 +220,7 @@ const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
             // 新增：如果工具执行成功且是文件修改类工具，则读取新内容并通知前端
             if (executionResult.result.success) {
                 const toolName = toolToProcess.function.name;
-                const fileModificationTools = ['insert_content', 'write_to_file', 'apply_diff', 'create_file'];
+                const fileModificationTools = ['insert_content', 'write_file', 'apply_diff', 'create_file'];
                 
                 if (fileModificationTools.includes(toolName)) {
                     const filePathArg = toolToProcess.toolArgs.path; // e.g., '我的第一章.txt' or 'subdir/file.txt'
@@ -246,7 +247,7 @@ const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
                             try {
                                 const { workspaceDir, shadowDir } = await getCheckpointDirs();
                                 const taskId = toolToProcess.sessionId || 'default-task';
-                                const checkpoint = await checkpointService.saveCheckpoint(taskId, workspaceDir, shadowDir, `Saved after executing ${toolName}`);
+                                const checkpoint = await checkpointService.saveShadowCheckpoint(taskId, workspaceDir, shadowDir, `Saved after executing ${toolName}`);
                                 if (checkpoint && checkpoint.commit) {
                                     checkpointId = checkpoint.commit;
                                     console.log(`[handlers.js] Checkpoint saved after ${toolName}. ID: ${checkpointId}`);
@@ -319,6 +320,31 @@ const handleSendBatchToolResults = async (event, processedTools) => {
 // 处理用户命令
 const handleProcessCommand = async (event, { message, sessionId, currentMessages }) => {
     console.log(`[handlers.js] handleProcessCommand: Received command: "${message}"`);
+    
+    // Check if it's the start of a new conversation to initialize checkpoint
+    const isNewTask = !currentMessages || currentMessages.filter(m => m.role === 'user').length === 0;
+    if (isNewTask) {
+        try {
+            console.log(`[handlers.js] New task detected (sessionId: ${sessionId}). Initializing checkpoint service...`);
+            const { workspaceDir, shadowDir } = await getCheckpointDirs();
+            const initResult = await checkpointService.initializeTaskCheckpoint(sessionId, workspaceDir, shadowDir);
+            console.log(`[handlers.js] Checkpoint service for task ${sessionId} initialized successfully.`);
+
+            // Send the initial checkpoint to the frontend
+            if (initResult.success && initResult.checkpointId) {
+                chatService._sendAiResponseToFrontend('initial-checkpoint-created', {
+                    checkpointId: initResult.checkpointId,
+                    message: '初始状态已存档'
+                });
+                console.log(`[handlers.js] Initial checkpoint ${initResult.checkpointId} created and sent to frontend.`);
+            }
+        } catch (error) {
+            console.error(`[handlers.js] Failed to initialize checkpoint service for task ${sessionId}:`, error);
+            // We can decide if we want to stop the process or just log the error.
+            // For now, just log it and continue. The user might not need the checkpoint feature.
+        }
+    }
+
     await chatService.processUserMessage(message, sessionId, currentMessages);
 };
  
@@ -909,7 +935,26 @@ function register(store) { // 添加 store 参数
 
   ipcMain.handle('checkpoints:restore', async (event, { taskId, archiveId }) => {
     const { workspaceDir, shadowDir } = await getCheckpointDirs();
-    return await checkpointService.restoreNovelArchive(taskId, workspaceDir, shadowDir, archiveId);
+    // The 'archiveId' from the frontend is actually the commit hash for the shadow checkpoint service.
+    const restoreResult = await checkpointService.restoreCheckpoint(taskId, workspaceDir, shadowDir, archiveId);
+
+    if (restoreResult.success) {
+      try {
+        // 在恢复成功后，立即读取并返回该任务的最新聊天记录
+        const fullHistory = await handleGetAiChatHistory();
+        const taskHistory = fullHistory.find(conv => conv.sessionId === taskId);
+        if (taskHistory) {
+          return { ...restoreResult, messages: taskHistory.messages };
+        }
+        // 如果在历史中未找到该会话，则可能是一个新的或空的会话
+        return { ...restoreResult, messages: [] };
+      } catch (error) {
+        console.error(`[handlers.js] 恢复存档后读取聊天记录失败 for task ${taskId}:`, error);
+        // 即使读取历史失败，也应将恢复成功的信息返回
+        return { ...restoreResult, error: 'File system restored, but failed to reload chat history.' };
+      }
+    }
+    return restoreResult;
   });
 
   ipcMain.handle('checkpoints:delete', async (event, { taskId, archiveId }) => {

@@ -88,3 +88,34 @@ export async function getDiff(taskId: string, workspaceDir: string, shadowDir: s
     }
     return await chatService.getDiff({ from, to });
 }
+
+export async function restoreCheckpoint(taskId: string, workspaceDir: string, shadowDir: string, commitHash: string) {
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    if (!chatService.isInitialized) {
+        await new Promise<void>((resolve) => chatService.once("initialize", () => resolve()));
+    }
+    return await chatService.restoreCheckpoint(commitHash);
+}
+
+export async function saveShadowCheckpoint(taskId: string, workspaceDir: string, shadowDir: string, message: string) {
+    // Initialization is now handled at the beginning of the task.
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    // Directly call saveCheckpoint, assuming service is already initialized.
+    return await chatService.saveCheckpoint(message);
+}
+export async function initializeTaskCheckpoint(taskId: string, workspaceDir: string, shadowDir: string) {
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    if (!chatService.isInitialized) {
+        // Wait for the async initialization to complete
+        await new Promise<void>((resolve, reject) => {
+            chatService.once("initialize", () => resolve());
+            chatService.once("error", (err) => reject(err.error));
+        });
+    }
+    // After initialization, the baseHash is set and can be used as the first checkpoint ID
+    return {
+        success: true,
+        message: `Checkpoint service for task ${taskId} is initialized.`,
+        checkpointId: chatService.baseHash
+    };
+}

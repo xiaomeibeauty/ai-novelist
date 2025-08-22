@@ -135,13 +135,21 @@ class BaseOpenAiCompatibleAdapter extends BaseModelAdapter {
 
         this.options = options;
 
+        this.client = null; // 延迟初始化
+    }
+
+    _getClient() {
+        if (this.client) {
+            return this.client;
+        }
+
         if (!this.options.apiKey) {
-            console.warn(`[${this.providerName}] API Key 未设置，部分功能可能受限。`);
+            throw new Error(`[${this.providerName}] API Key is not set. Please configure it in the settings.`);
         }
 
         const isAzureAiInference = this._isAzureAiInference(this.baseURL);
         const urlHost = this._getUrlHost(this.baseURL);
-        const isAzureOpenAi = urlHost.includes("azure.com") || urlHost.endsWith(".azure.com") || this.options.openAiUseAzure; // 假设 openAiUseAzure 是一个选项
+        const isAzureOpenAi = urlHost.includes("azure.com") || urlHost.endsWith(".azure.com") || this.options.openAiUseAzure;
 
         if (isAzureAiInference) {
             this.client = new OpenAI({
@@ -170,6 +178,7 @@ class BaseOpenAiCompatibleAdapter extends BaseModelAdapter {
                 maxRetries: 2,
             });
         }
+        return this.client;
     }
 
     /**
@@ -199,7 +208,8 @@ class BaseOpenAiCompatibleAdapter extends BaseModelAdapter {
             ...(this._isGrokXAI(this.baseURL) ? {} : { stream_options: { include_usage: true } }),
         };
 
-        const stream = await this.client.chat.completions.create(params);
+        const client = this._getClient();
+        const stream = await client.chat.completions.create(params);
 
         for await (const chunk of stream) {
             const delta = chunk.choices[0]?.delta;
@@ -242,7 +252,8 @@ class BaseOpenAiCompatibleAdapter extends BaseModelAdapter {
         const { id: modelId } = this.getModel();
 
         try {
-            const response = await this.client.chat.completions.create({
+            const client = this._getClient();
+            const response = await client.chat.completions.create({
                 model: modelId,
                 messages: [{ role: "user", content: prompt }],
             });

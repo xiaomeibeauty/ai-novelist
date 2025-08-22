@@ -7,21 +7,28 @@ export const registerMainIpcListeners = (dispatch) => {
     const { type, payload: innerPayload } = payload;
     
     switch (type) {
+      case 'initial-checkpoint-created':
       case 'file-content-updated':
         // 这是一个文件更新事件，它会触发两个动作：
         // 1. 同步 novelSlice 中的文件内容
-        console.log(`[MainIpcHandler] Dispatching novel/syncFileContent for path: ${innerPayload.filePath}`);
-        dispatch({ type: 'novel/syncFileContent', payload: innerPayload });
+        if (type === 'file-content-updated') {
+          console.log(`[MainIpcHandler] Dispatching novel/syncFileContent for path: ${innerPayload.filePath}`);
+          dispatch({ type: 'novel/syncFileContent', payload: innerPayload });
+        }
 
         // 2. 如果存在 checkpointId，则向 chatSlice 追加一条系统消息
         if (innerPayload.checkpointId) {
+          const messageText = type === 'initial-checkpoint-created'
+            ? innerPayload.message
+            : `文件 ${innerPayload.filePath} 已保存一个新版本。`;
+
           console.log(`[MainIpcHandler] Dispatching chat/appendMessage for checkpoint: ${innerPayload.checkpointId}`);
           const systemMessage = {
             sender: 'System',
-            role: 'tool',
+            role: 'system',
             name: 'Checkpoint Saved',
-            text: `文件 ${innerPayload.filePath} 已保存一个新版本。`,
-            content: `文件 ${innerPayload.filePath} 已保存一个新版本。`,
+            text: messageText,
+            content: messageText,
             checkpointId: innerPayload.checkpointId,
             className: 'system-info',
             // 确保消息有唯一的 id，以避免 react key 警告
@@ -30,7 +37,7 @@ export const registerMainIpcListeners = (dispatch) => {
           dispatch({ type: 'chat/appendMessage', payload: systemMessage });
         }
         break;
-      
+
       case 'system-message':
         // 专门处理后端主动推送的系统消息（例如，首次存档）
         console.log(`[MainIpcHandler] Dispatching chat/appendMessage for system message.`);

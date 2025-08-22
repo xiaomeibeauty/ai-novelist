@@ -96,7 +96,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			await git.addConfig("user.name", "Roo Code")
 			await git.addConfig("user.email", "noreply@example.com")
 			await this.writeExcludeFile()
-			await this.stageAll(git)
+			await this.stageAll(git) // <-- This is now desired behavior based on user feedback.
 			const { commit } = await git.commit("initial commit", { "--allow-empty": null })
 			this.baseHash = commit
 			created = true

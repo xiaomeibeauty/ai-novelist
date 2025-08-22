@@ -5,6 +5,7 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import HardBreak from '@tiptap/extension-hard-break';
 import DiffViewer from './DiffViewer'; // 引入 DiffViewer
+import ContextMenu from './ContextMenu'; // 引入 ContextMenu
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faSave, faExchangeAlt } from '@fortawesome/free-solid-svg-icons'; // 添加图标
@@ -309,15 +310,9 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
     setShowContextMenu(true);
   }, []);
 
-  useEffect(() => {
-    const handleClickOutside = () => setShowContextMenu(false);
-    if (showContextMenu) {
-      document.addEventListener('click', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-    };
-  }, [showContextMenu]);
+  const handleCloseContextMenu = useCallback(() => {
+    setShowContextMenu(false);
+  }, []);
 
   const handleMenuItemClick = useCallback((action) => {
     const editor = TiptapEditorInstance.current;
@@ -346,10 +341,29 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
       default:
         break;
     }
-    setShowContextMenu(false);
+    // No need to call setShowContextMenu(false) here, as ContextMenu's onClose will handle it.
   }, []);
 
-  const isSelectionActive = TiptapEditorInstance.current ? !TiptapEditorInstance.current.state.selection.empty : false;
+  const getContextMenuItems = () => {
+    const isSelectionActive = TiptapEditorInstance.current ? !TiptapEditorInstance.current.state.selection.empty : false;
+    const items = [
+      {
+        label: '剪切',
+        onClick: () => handleMenuItemClick('cut'),
+        disabled: !isSelectionActive,
+      },
+      {
+        label: '复制',
+        onClick: () => handleMenuItemClick('copy'),
+        disabled: !isSelectionActive,
+      },
+      {
+        label: '粘贴',
+        onClick: () => handleMenuItemClick('paste'),
+      },
+    ];
+    return items;
+  };
 
   const handleTitleSave = useCallback(async () => {
     if (!activeTab) return;
@@ -444,29 +458,12 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
                 ></div>
               </div>
               {showContextMenu && (
-                <div
-                  className="context-menu"
-                  style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
-                >
-                  <div
-                    className={`context-menu-item ${!isSelectionActive ? 'disabled' : ''}`}
-                    onClick={() => isSelectionActive && handleMenuItemClick('cut')}
-                  >
-                    剪切
-                  </div>
-                  <div
-                    className={`context-menu-item ${!isSelectionActive ? 'disabled' : ''}`}
-                    onClick={() => isSelectionActive && handleMenuItemClick('copy')}
-                  >
-                    复制
-                  </div>
-                  <div
-                    className="context-menu-item"
-                    onClick={() => handleMenuItemClick('paste')}
-                  >
-                    粘贴
-                  </div>
-                </div>
+                <ContextMenu
+                  x={contextMenuPos.x}
+                  y={contextMenuPos.y}
+                  items={getContextMenuItems()}
+                  onClose={handleCloseContextMenu}
+                />
               )}
             </>
           )}

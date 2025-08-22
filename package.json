@@ -14,8 +14,8 @@
     "build:backend": "tsc -p tsconfig.backend.json",
     "build:react": "npm run build --workspace=frontend/react-app",
     "clean:novel-data": "node -e \"require('fs').rmSync('novel', { recursive: true, force: true }); require('fs').mkdirSync('novel', { recursive: true });\"",
-    "pack": "npm run clean:novel-data && npm run build:react && electron-builder --dir",
-    "dist": "npm run clean:novel-data && npm run build:react && electron-builder",
+    "pack": "npm run clean:novel-data && npm run build:backend && npm run build:react && electron-builder --dir",
+    "dist": "npm run clean:novel-data && npm run build:backend && npm run build:react && electron-builder",
     "build": "npm run build --workspace=frontend/react-app",
     "lint": "eslint ."
   },

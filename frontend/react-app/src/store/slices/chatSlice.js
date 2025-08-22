@@ -93,6 +93,92 @@ const chatSlice = createSlice({
     setMessages: (state, action) => {
       state.messages = action.payload;
     },
+    // 新增：用于从历史记录中恢复和重构消息，以实现统一渲染
+    restoreMessages: (state, action) => {
+      const rawMessages = action.payload;
+      const newMessages = [];
+      
+      if (!rawMessages || !Array.isArray(rawMessages)) {
+        state.messages = [];
+        return;
+      }
+
+      for (const msg of rawMessages) {
+        // 为每个恢复的消息生成一个唯一的React key
+        const id = msg.id || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-restored`;
+
+        if (msg.role === 'user') {
+          newMessages.push({
+            id,
+            sender: 'User',
+            text: msg.content,
+            role: 'user',
+            content: msg.content,
+            className: 'user',
+            sessionId: msg.sessionId,
+          });
+        } else if (msg.role === 'assistant') {
+          // 解析工具调用，并为历史记录添加 'historical' 状态
+          const toolCalls = (msg.tool_calls || []).map(tc => {
+            let toolArgs;
+            try {
+              toolArgs = JSON.parse(tc.function.arguments || '{}');
+            } catch (e) {
+              toolArgs = { error: 'failed to parse arguments', raw: tc.function.arguments };
+            }
+            return {
+              id: tc.id,
+              function: tc.function,
+              type: 'function',
+              toolArgs,
+              // **关键**: 添加状态以告知UI这是历史记录，不应有交互按钮
+              status: 'historical',
+            };
+          });
+
+          newMessages.push({
+            id,
+            sender: 'AI',
+            text: msg.content || '',
+            role: 'assistant',
+            content: msg.content || '',
+            className: 'ai',
+            sessionId: msg.sessionId,
+            // 只有当存在工具调用时才添加此属性
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            isLoading: false,
+          });
+        } else if (msg.role === 'tool') {
+            // 将工具执行结果格式化为一条易于阅读的系统消息
+            let resultText = `[Tool execution: ${msg.name}]`;
+            try {
+                const result = JSON.parse(msg.content);
+                if (result.success) {
+                    resultText = `✅ 工具 [${msg.name}] 已成功执行。`;
+                } else {
+                    resultText = `❌ 工具 [${msg.name}] 执行失败: ${result.error || '未知错误'}`;
+                }
+            } catch(e) { /* 忽略解析错误，使用默认文本 */ }
+
+            newMessages.push({
+                id,
+                sender: 'System',
+                text: resultText,
+                role: 'system',
+                content: resultText,
+                className: 'system-message',
+                sessionId: msg.sessionId,
+            });
+        }
+        // 我们在此处特意过滤掉 role === 'system' 的消息，因为它们是给AI的上下文，通常不在对话中展示。
+      }
+      
+      // 重置整个聊天状态，并用重构后的消息列表替换
+      state.messages = newMessages;
+      state.pendingToolCalls = [];
+      state.toolCallState = 'idle';
+      state.questionCard = null;
+    },
     setIsHistoryPanelVisible: (state, action) => {
       state.isHistoryPanelVisible = action.payload;
     },
@@ -167,9 +253,8 @@ const chatSlice = createSlice({
                     lastAssistantMessage = newPlaceholder;
                 }
 
-                // 清除加载状态（如果是第一次收到数据）
-                if (lastAssistantMessage.isLoading) {
-                    lastAssistantMessage.isLoading = false;
+                // 只有在第一次收到数据时才清空占位内容，但保持 isLoading 状态
+                if (lastAssistantMessage.isLoading && !lastAssistantMessage.content && !lastAssistantMessage.text) {
                     lastAssistantMessage.content = '';
                     lastAssistantMessage.text = '';
                 }
@@ -424,6 +509,7 @@ export const {
   appendMessage,
   setQuestionCard,
   setMessages,
+  restoreMessages, // <--- 导出新的 reducer
   // 导出所有其他 chatSlice.actions
   // ipcAiResponseReceived 不需要导出，因为它只在 extraReducers 中被调用
   setIsHistoryPanelVisible,

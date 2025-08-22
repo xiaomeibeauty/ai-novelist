@@ -6,12 +6,7 @@ class DeepSeekAdapter extends BaseModelAdapter {
         super();
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
-        this.openaiClient = new OpenAI({
-            apiKey: this.apiKey,
-            baseURL: this.baseUrl,
-            timeout: 30000, // 30秒超时
-            maxRetries: 2    // 失败重试2次
-        });
+        this.openaiClient = null; // 延迟初始化
         // DeepSeek 明确支持的模型
         this.supportedModels = [
             { id: "deepseek-chat", name: "DeepSeek Chat", description: "DeepSeek 的聊天模型", provider: "deepseek" },
@@ -20,8 +15,24 @@ class DeepSeekAdapter extends BaseModelAdapter {
         ];
     }
 
+    _getClient() {
+        if (!this.openaiClient) {
+            if (!this.apiKey) {
+                throw new Error("DeepSeek API key is not set. Please configure it in the settings.");
+            }
+            this.openaiClient = new OpenAI({
+                apiKey: this.apiKey,
+                baseURL: this.baseUrl,
+                timeout: 30000, // 30秒超时
+                maxRetries: 2    // 失败重试2次
+            });
+        }
+        return this.openaiClient;
+    }
+
     async *generateCompletion(messages, options) {
         try {
+            const client = this._getClient();
             // 关键修复：仅从消息中移除 'reasoning_content'，保留所有其他字段，
             // 以免移除 'tool_call_id' 或 'name' 等必要字段。
             const processedMessages = messages.map(({ reasoning_content, ...rest }) => rest);
@@ -35,7 +46,7 @@ class DeepSeekAdapter extends BaseModelAdapter {
 
             console.log(`[Adapter] Sending to DeepSeek:`, JSON.stringify(params, null, 2));
 
-            const completion = await this.openaiClient.chat.completions.create(params);
+            const completion = await client.chat.completions.create(params);
 
             if (options.stream) {
                 for await (const chunk of completion) {

@@ -23,7 +23,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getDiff = exports.getHistory = exports.deleteNovelArchive = exports.restoreNovelArchive = exports.saveArchive = void 0;
+exports.initializeTaskCheckpoint = exports.saveShadowCheckpoint = exports.restoreCheckpoint = exports.getDiff = exports.getHistory = exports.deleteNovelArchive = exports.restoreNovelArchive = exports.saveArchive = void 0;
 const path = __importStar(require("path"));
 const RepoPerTaskCheckpointService_1 = require("./RepoPerTaskCheckpointService");
 const NovelArchiveService_1 = require("./NovelArchiveService");
@@ -101,3 +101,35 @@ async function getDiff(taskId, workspaceDir, shadowDir, from, to) {
     return await chatService.getDiff({ from, to });
 }
 exports.getDiff = getDiff;
+async function restoreCheckpoint(taskId, workspaceDir, shadowDir, commitHash) {
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    if (!chatService.isInitialized) {
+        await new Promise((resolve) => chatService.once("initialize", () => resolve()));
+    }
+    return await chatService.restoreCheckpoint(commitHash);
+}
+exports.restoreCheckpoint = restoreCheckpoint;
+async function saveShadowCheckpoint(taskId, workspaceDir, shadowDir, message) {
+    // Initialization is now handled at the beginning of the task.
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    // Directly call saveCheckpoint, assuming service is already initialized.
+    return await chatService.saveCheckpoint(message);
+}
+exports.saveShadowCheckpoint = saveShadowCheckpoint;
+async function initializeTaskCheckpoint(taskId, workspaceDir, shadowDir) {
+    const chatService = getChatHistoryService(taskId, workspaceDir, shadowDir);
+    if (!chatService.isInitialized) {
+        // Wait for the async initialization to complete
+        await new Promise((resolve, reject) => {
+            chatService.once("initialize", () => resolve());
+            chatService.once("error", (err) => reject(err.error));
+        });
+    }
+    // After initialization, the baseHash is set and can be used as the first checkpoint ID
+    return {
+        success: true,
+        message: `Checkpoint service for task ${taskId} is initialized.`,
+        checkpointId: chatService.baseHash
+    };
+}
+exports.initializeTaskCheckpoint = initializeTaskCheckpoint;

@@ -38,24 +38,24 @@ async function initializeModelProvider() { // 修改为 async 函数
 
     // 实例化具体的模型适配器
     // DeepSeek 适配器
+    const deepseekAdapter = new DeepSeekAdapter(deepseekApiKey, deepseekBaseUrl);
+    await modelRegistryInstance.registerAdapter('deepseek', deepseekAdapter);
     if (deepseekApiKey) {
-        const deepseekAdapter = new DeepSeekAdapter(deepseekApiKey, deepseekBaseUrl);
-        await modelRegistryInstance.registerAdapter('deepseek', deepseekAdapter);
         console.log("DeepSeekAdapter 已注册。");
     } else {
-        console.warn("DeepSeek API Key 未设置，DeepSeekAdapter 未注册。");
+        console.warn("DeepSeek API Key 未设置，但 DeepSeekAdapter 已注册。");
     }
 
     // OpenAI 适配器
     const openaiApiKey = storeInstance.get('openaiApiKey'); // 从 electron-store 获取 API Key
     const openaiBaseUrl = storeInstance.get('openaiBaseUrl') || 'https://api.openai.com/v1'; // 从 electron-store 获取 baseURL，提供默认值
 
+    const openaiAdapter = new OpenAIAdapter(openaiApiKey, openaiBaseUrl);
+    await modelRegistryInstance.registerAdapter('openai', openaiAdapter);
     if (openaiApiKey) {
-        const openaiAdapter = new OpenAIAdapter(openaiApiKey, openaiBaseUrl);
-        await modelRegistryInstance.registerAdapter('openai', openaiAdapter);
         console.log("OpenAIAdapter 已注册。");
     } else {
-        console.warn("OpenAI API Key 未设置，OpenAIAdapter 未注册。");
+        console.warn("OpenAI API Key 未设置，但 OpenAIAdapter 已注册。");
     }
 
     // Ollama 配置
@@ -76,19 +76,19 @@ async function initializeModelProvider() { // 修改为 async 函数
     const openrouterApiKey = storeInstance.get('openrouterApiKey');
     const openrouterBaseUrl = storeInstance.get('openrouterBaseUrl'); // 可选
 
-    if (openrouterApiKey) {
-        try {
-            const openrouterAdapter = new OpenRouterAdapter({
-                apiKey: openrouterApiKey,
-                baseURL: openrouterBaseUrl // 如果未提供，适配器内部会使用默认值
-            });
-            await modelRegistryInstance.registerAdapter('openrouter', openrouterAdapter);
+    try {
+        const openrouterAdapter = new OpenRouterAdapter({
+            apiKey: openrouterApiKey,
+            baseURL: openrouterBaseUrl // 如果未提供，适配器内部会使用默认值
+        });
+        await modelRegistryInstance.registerAdapter('openrouter', openrouterAdapter);
+        if (openrouterApiKey) {
             console.log("OpenRouterAdapter 已注册。");
-        } catch (error) {
-            console.warn(`OpenRouterAdapter 注册失败: ${error.message}`);
+        } else {
+            console.warn("OpenRouter API Key 未设置，但 OpenRouterAdapter 已注册。");
         }
-    } else {
-        console.warn("OpenRouter API Key 未设置，OpenRouterAdapter 未注册。");
+    } catch (error) {
+        console.warn(`OpenRouterAdapter 注册失败: ${error.message}`);
     }
 
     // 新增：处理用户自定义的 OpenAI 兼容提供商

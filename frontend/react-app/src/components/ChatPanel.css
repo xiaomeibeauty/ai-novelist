@@ -56,7 +56,6 @@
     color: #ffffff; /* 白色文字 */
     align-self: flex-end;
     margin-left: auto;
-    text-align: right;
     border-bottom-right-radius: 3px;
 }
 
@@ -790,7 +789,7 @@ input:checked + .slider:before {
   }
 }
 
-.message-content .fa-spin {
+.fa-spin {
   animation: fa-spin 1s infinite linear;
 }
 .message .message-actions {
@@ -827,4 +826,136 @@ input:checked + .slider:before {
   border: 1px solid #ccc;
   border-radius: 4px;
   padding: 5px;
+}
+
+/* 存档点消息样式 */
+.checkpoint-message {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 0;
+  margin: 10px 0;
+  width: 100%;
+}
+
+.checkpoint-restore-button {
+  background-color: #f0f0f0; /* 浅灰色背景 */
+  color: #555; /* 深灰色文字 */
+  border: 1px solid #ccc; /* 灰色边框 */
+  padding: 8px 15px;
+  border-radius: 15px; /* 圆角 */
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px; /* 图标和文字的间距 */
+  font-size: 13px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.checkpoint-restore-button:hover {
+  background-color: #e0e0e0; /* 悬停时颜色变深 */
+  color: #333;
+}
+
+.checkpoint-id-display {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #999;
+  font-family: monospace;
+}
+/* Tool Call Collapsible Section */
+.tool-call-details {
+    background-color: #4a4a4a; /* 与 "思考过程" 颜色一致 */
+    border: 1px solid #666666;
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+.tool-call-summary {
+    font-weight: bold;
+    color: #ffffff;
+    cursor: pointer;
+    list-style: none; /* 移除默认的箭头 */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tool-call-summary::-webkit-details-marker {
+    display: none; /* 移除 Chrome/Safari 的默认箭头 */
+}
+
+/* 自定义展开/折叠图标 */
+.tool-call-summary::after {
+    content: '▼'; /* 默认是向下的三角形 */
+    font-size: 0.8em;
+    margin-left: 5px;
+    transition: transform 0.2s ease-in-out;
+}
+
+.tool-call-details[open] > .tool-call-summary::after {
+    transform: rotate(180deg); /* 展开时旋转图标 */
+}
+
+.tool-calls-container {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #666666;
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* 卡片之间的间距 */
+}
+/* AI Typing Spinner Style */
+.ai-typing-spinner {
+    margin-right: 8px; /* 在图标和文本之间添加一些间距 */
+    vertical-align: middle; /* 确保图标和文本垂直对齐 */
+}
+
+.message-content {
+    display: flex;
+    align-items: flex-start; /* 顶部对齐，以防文本换行 */
+}
+/* Tool Call Card specific styles */
+.tool-call-card {
+    background-color: #3e3e3e;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 10px; /* 与其他卡片保持间距 */
+}
+
+.tool-call-card .tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: bold;
+    color: #e0e0e0;
+    margin-bottom: 8px;
+}
+
+.tool-call-card .tool-icon {
+    color: #66b2ff; /* A light blue to signify 'tool' */
+}
+
+.tool-call-card .historical-badge {
+    background-color: #555555;
+    color: #cccccc;
+    font-size: 0.7em;
+    padding: 2px 5px;
+    border-radius: 3px;
+    margin-left: auto; /* Push badge to the right */
+}
+
+.tool-call-card .tool-args {
+    background-color: #2e2e2e;
+    padding: 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.85em;
+    color: #d0d0d0;
+    /* Core fix for the wrapping issue */
+    white-space: pre-wrap;   /* Allows text to wrap */
+    word-break: break-all;     /* Breaks long words or strings */
+    overflow-x: auto;        /* Adds horizontal scroll for very long unbreakable lines if needed */
 }
