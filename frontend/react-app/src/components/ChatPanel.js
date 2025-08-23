@@ -21,6 +21,8 @@ import {
   deleteMessage,
   startEditing,
   restoreMessages, // <--- 导入新的 action
+  setCustomPromptForMode, // 新增：导入设置模式特定提示词的action
+  resetCustomPromptForMode, // 新增：导入重置模式特定提示词的action
 } from '../store/slices/chatSlice';
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
 import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
@@ -33,6 +35,7 @@ import './ChatPanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil } from '@fortawesome/free-solid-svg-icons';
 import CustomProviderSettings from './CustomProviderSettings'; // 新增
+import PromptManagerModal from './PromptManagerModal'; // 新增：提示词管理模态框
 
 // 新增：可重用的工具调用渲染组件
 const ToolCallCard = ({ toolCall }) => {
@@ -108,6 +111,7 @@ const ChatPanel = memo(() => {
     customSystemPrompt,
     enableStream,
     editingMessageId,
+    customPrompts,
   } = useSelector((state) => state.chat);
 
   // 从 novel slice 获取状态
@@ -123,6 +127,9 @@ const ChatPanel = memo(() => {
   const [selectedProvider, setSelectedProvider] = useState('deepseek'); // 默认选择 DeepSeek
   const [notification, setNotification] = useState({ show: false, message: '' });
   const [editingText, setEditingText] = useState('');
+  const [currentMode, setCurrentMode] = useState('general'); // 新增：当前创作模式
+  const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false); // 新增：模式下拉菜单状态
+  const [showPromptManager, setShowPromptManager] = useState(false); // 新增：提示词管理模态框状态
 
   const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send, on, removeListener } = useIpcRenderer();
   // 将 loadSettings 定义为 useCallback，确保其稳定性
@@ -156,14 +163,27 @@ const ChatPanel = memo(() => {
         console.log('未加载到模型，使用默认模型: deepseek-chat');
       }
 
-      // 加载自定义系统提示词
-      const storedCustomPrompt = await getStoreValue('customSystemPrompt');
-      if (storedCustomPrompt) {
-        dispatch(setCustomSystemPrompt(storedCustomPrompt));
-        console.log(`加载到的自定义系统提示词: ${storedCustomPrompt.substring(0, 50)}...`);
+      // 加载当前模式设置
+      const storedCurrentMode = await getStoreValue('currentMode');
+      if (storedCurrentMode) {
+        setCurrentMode(storedCurrentMode);
+        console.log(`加载到的当前模式: ${storedCurrentMode}`);
       } else {
-        dispatch(setCustomSystemPrompt(DEFAULT_SYSTEM_PROMPT)); // 使用默认提示词
-        console.log('未加载到自定义系统提示词，使用默认。');
+        setCurrentMode('general'); // 默认模式
+        console.log('未加载到当前模式，使用默认模式: general');
+      }
+
+      // 加载每个模式的自定义提示词
+      const storedCustomPrompts = await getStoreValue('customPrompts');
+      console.log('从存储加载的 customPrompts:', storedCustomPrompts);
+      if (storedCustomPrompts) {
+        // 更新Redux state中的每个模式提示词
+        Object.entries(storedCustomPrompts).forEach(([mode, prompt]) => {
+          dispatch(setCustomPromptForMode({ mode, prompt }));
+        });
+        console.log('加载到的模式自定义提示词:', storedCustomPrompts);
+      } else {
+        console.log('未加载到自定义提示词，使用初始状态。');
       }
 
       // 获取并设置可用模型列表
@@ -272,12 +292,25 @@ const ChatPanel = memo(() => {
     dispatch(setQuestionCard(null));
 
     try {
-      await invoke('process-command', { message: messageText, sessionId: currentSessionId, currentMessages: messages });
+      // 直接从存储获取当前模式的自定义提示词，避免Redux状态同步延迟问题
+      const storedCustomPrompts = await getStoreValue('customPrompts');
+      const customPrompt = storedCustomPrompts ? storedCustomPrompts[currentMode] : '';
+      const hasCustomPrompt = customPrompt !== null && customPrompt !== undefined && customPrompt !== '';
+      console.log(`[ChatPanel] 发送消息，模式: ${currentMode}, 自定义提示词: ${hasCustomPrompt ? '有' : '无'}`);
+      console.log(`[ChatPanel] 自定义提示词详情: 类型=${typeof customPrompt}, 值="${customPrompt}"`);
+      console.log(`[ChatPanel] 从存储读取的完整提示词:`, storedCustomPrompts);
+      await invoke('process-command', {
+        message: messageText,
+        sessionId: currentSessionId,
+        currentMessages: messages,
+        mode: currentMode,
+        customPrompt: customPrompt // 添加自定义提示词参数
+      });
     } catch (error) {
       console.error('Error sending message to AI:', error);
       dispatch(appendMessage({ sender: 'System', text: `发送消息失败: ${error.message}`, role: 'system', content: `发送消息失败: ${error.message}`, className: 'system-error' }));
     }
-  }, [dispatch, invoke, messages, questionCard, handleUserQuestionResponse, enableStream]);
+  }, [dispatch, invoke, messages, questionCard, handleUserQuestionResponse, enableStream, currentMode]);
 
   // New handler for approving/rejecting all pending tool calls
   const handleToolApproval = useCallback(async (action) => {
@@ -342,6 +375,8 @@ const ChatPanel = memo(() => {
       await setStoreValue('defaultAiModel', selectedModel);
       console.log(`准备保存自定义系统提示词: ${customSystemPrompt.substring(0, 50)}...`);
       await setStoreValue('customSystemPrompt', customSystemPrompt); // 保存自定义提示词
+      console.log(`准备保存当前模式: ${currentMode}`);
+      await setStoreValue('currentMode', currentMode); // 保存当前模式
       await setStoreValue('enableStream', enableStream); // 保存流式传输设置
       send('set-streaming-mode', { stream: enableStream }); // **新增**: 保存时也同步到后端
       dispatch(setShowSettingsModal(false));
@@ -700,6 +735,40 @@ const ChatPanel = memo(() => {
           </div>
         )}
         <div className="chat-input-group">
+          <div className="mode-selector-dropdown">
+            <button
+              className="mode-dropdown-toggle"
+              onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
+            >
+              {getModeDisplayName(currentMode)}模式 ▲
+            </button>
+            
+            {isModeDropdownOpen && (
+              <div className="mode-dropdown-menu">
+                <button
+                  className={currentMode === 'general' ? 'active' : ''}
+                  onClick={() => { console.log('切换到通用模式'); setCurrentMode('general'); setStoreValue('currentMode', 'general'); setIsModeDropdownOpen(false); }}
+                >通用</button>
+                <button
+                  className={currentMode === 'outline' ? 'active' : ''}
+                  onClick={() => { console.log('切换到细纲模式'); setCurrentMode('outline'); setStoreValue('currentMode', 'outline'); setIsModeDropdownOpen(false); }}
+                >细纲</button>
+                <button
+                  className={currentMode === 'writing' ? 'active' : ''}
+                  onClick={() => { console.log('切换到写作模式'); setCurrentMode('writing'); setStoreValue('currentMode', 'writing'); setIsModeDropdownOpen(false); }}
+                >写作</button>
+                <button
+                  className={currentMode === 'adjustment' ? 'active' : ''}
+                  onClick={() => { console.log('切换到调整模式'); setCurrentMode('adjustment'); setStoreValue('currentMode', 'adjustment'); setIsModeDropdownOpen(false); }}
+                >调整</button>
+                <div className="dropdown-divider"></div>
+                <button
+                  className="prompt-manager-button"
+                  onClick={() => { setShowPromptManager(true); setIsModeDropdownOpen(false); }}
+                >提示词管理</button>
+              </div>
+            )}
+          </div>
           <textarea
             id="chatInput"
             placeholder="输入指令..."
@@ -797,28 +866,7 @@ const ChatPanel = memo(() => {
              </select>
            </div>
 
-           {/* 自定义系统提示词 */}
-           <div className="setting-item">
-             <label htmlFor="customSystemPrompt">自定义系统提示词:</label>
-             <textarea
-               id="customSystemPrompt"
-               value={customSystemPrompt}
-               onChange={(e) => dispatch(setCustomSystemPrompt(e.target.value))}
-               placeholder="输入自定义系统提示词..."
-               rows="6"
-               style={{ width: '100%' }}
-             ></textarea>
-             <button
-               onClick={() => {
-                 dispatch(resetCustomSystemPrompt());
-                 setStoreValue('customSystemPrompt', DEFAULT_SYSTEM_PROMPT); // 同步更新持久化存储
-               }}
-               className="reset-button"
-               style={{ marginTop: '10px' }}
-             >
-               重置为默认提示词
-             </button>
-           </div>
+           {/* 自定义系统提示词部分已移至专门的提示词管理模态框 */}
 
            {/*
             // 流式传输开关
@@ -862,8 +910,27 @@ const ChatPanel = memo(() => {
           onClose={() => setNotification({ show: false, message: '' })}
         />
       )}
+
+      {/* 提示词管理模态框 */}
+      {showPromptManager && (
+        <PromptManagerModal
+          isOpen={showPromptManager}
+          onClose={() => setShowPromptManager(false)}
+        />
+      )}
     </React.Fragment>
   );
 });
+
+// 辅助函数：获取模式显示名称
+const getModeDisplayName = (mode) => {
+  const names = {
+    general: '通用',
+    outline: '细纲',
+    writing: '写作',
+    adjustment: '调整'
+  };
+  return names[mode] || mode;
+};
 
 export default ChatPanel;

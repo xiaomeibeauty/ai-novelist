@@ -318,8 +318,9 @@ const handleSendBatchToolResults = async (event, processedTools) => {
 };
 
 // 处理用户命令
-const handleProcessCommand = async (event, { message, sessionId, currentMessages }) => {
-    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}"`);
+const handleProcessCommand = async (event, { message, sessionId, currentMessages, mode, customPrompt }) => {
+    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}", Mode: ${mode}, Custom Prompt: "${customPrompt}"`);
+    console.log(`[handlers.js] Custom Prompt type: ${typeof customPrompt}, length: ${customPrompt ? customPrompt.length : 0}`);
     
     // Check if it's the start of a new conversation to initialize checkpoint
     const isNewTask = !currentMessages || currentMessages.filter(m => m.role === 'user').length === 0;
@@ -345,7 +346,7 @@ const handleProcessCommand = async (event, { message, sessionId, currentMessages
         }
     }
 
-    await chatService.processUserMessage(message, sessionId, currentMessages);
+    await chatService.processUserMessage(message, sessionId, currentMessages, mode, customPrompt);
 };
  
 // 新的、修复后的用户问题回复处理器
@@ -373,7 +374,7 @@ const handleUserQuestionResponse = async (event, { response, toolCallId }) => {
             storeInstance = new Store();
         }
         const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
-        const customSystemPrompt = storeInstance.get('customSystemPrompt');
+        // 不再从存储中读取旧版自定义提示词，使用前端传递的参数
 
         // **关键修复**: 调用新的流式 sendToolResultToAI 并正确处理其输出
         const stream = chatService.sendToolResultToAI(toolResultsArray, defaultModelId);
@@ -875,8 +876,10 @@ const handleListAllModels = async () => {
 };
 
 // 注册所有IPC处理器
-function register(store) { // 添加 store 参数
+function register(store) { // 接收 store 参数并设置全局实例
+  storeInstance = store; // 设置全局存储实例
   console.log('[handlers.js] register: 开始注册 IPC 处理器...');
+  console.log(`[DEBUG] register: storeInstance set, path: ${storeInstance.path}`);
   // 新增: 处理前端发送的流式设置
   ipcMain.on('set-streaming-mode', (event, payload) => {
     chatService.setStreamingMode(payload);
@@ -978,7 +981,29 @@ function register(store) { // 添加 store 参数
   // 新增：get-store-value 处理器
   ipcMain.handle('get-store-value', async (event, key) => {
     try {
-        const value = store.get(key);
+        if (!storeInstance) {
+            console.log(`[DEBUG] get-store-value: storeInstance 未初始化，创建新实例，key: ${key}`);
+            const StoreModule = await import('electron-store');
+            const Store = StoreModule.default;
+            storeInstance = new Store();
+            console.log(`[DEBUG] get-store-value: 新 storeInstance 创建完成，存储路径: ${storeInstance.path}`);
+        } else {
+            console.log(`[DEBUG] get-store-value: 使用现有 storeInstance，key: ${key}`);
+        }
+        const value = storeInstance.get(key);
+        
+        // 特别处理 customPrompts 键的详细日志
+        if (key === 'customPrompts') {
+            console.log(`[DEBUG] get-store-value: 获取 customPrompts, 数据类型: ${typeof value}, 值结构:`, value);
+            if (value && typeof value === 'object') {
+                console.log(`[DEBUG] get-store-value: customPrompts 键数量: ${Object.keys(value).length}`);
+                for (const mode in value) {
+                    console.log(`[DEBUG] get-store-value: customPrompts[${mode}]: ${value[mode]}`);
+                }
+            }
+        }
+        
+        console.log(`[DEBUG] get-store-value: 获取 key=${key}, value=`, value);
         return value;
     } catch (error) {
         console.error(`获取值失败: ${key}`, error);
@@ -989,7 +1014,38 @@ function register(store) { // 添加 store 参数
   // set-store-value 处理器
   ipcMain.handle('set-store-value', async (event, key, value) => {
     try {
-        store.set(key, value);
+        if (!storeInstance) {
+            console.log(`[DEBUG] set-store-value: storeInstance 未初始化，创建新实例，key: ${key}`);
+            const StoreModule = await import('electron-store');
+            const Store = StoreModule.default;
+            storeInstance = new Store();
+            console.log(`[DEBUG] set-store-value: 新 storeInstance 创建完成，存储路径: ${storeInstance.path}`);
+        } else {
+            console.log(`[DEBUG] set-store-value: 使用现有 storeInstance，key: ${key}`);
+        }
+        
+        // 特别处理 customPrompts 键的详细日志
+        if (key === 'customPrompts') {
+            console.log(`[DEBUG] set-store-value: 保存 customPrompts, 数据类型: ${typeof value}, 值结构:`, value);
+            if (value && typeof value === 'object') {
+                console.log(`[DEBUG] set-store-value: customPrompts 键数量: ${Object.keys(value).length}`);
+                for (const mode in value) {
+                    console.log(`[DEBUG] set-store-value: customPrompts[${mode}]: ${value[mode]}`);
+                }
+            }
+        }
+        
+        console.log(`[DEBUG] set-store-value: 保存 key=${key}, value=`, value);
+        storeInstance.set(key, value);
+        
+        // 验证保存是否成功
+        const savedValue = storeInstance.get(key);
+        console.log(`[DEBUG] set-store-value: 验证保存 key=${key}, 实际值=`, savedValue);
+        
+        // 强制写入磁盘并检查文件是否存在
+        await storeInstance.store;
+        console.log(`[DEBUG] set-store-value: 数据已强制写入磁盘`);
+        
         return { success: true, message: `值已保存: ${key}` };
     } catch (error) {
         console.error(`保存值失败: ${key}`, error);

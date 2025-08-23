@@ -53,7 +53,13 @@ const chatSlice = createSlice({
     isDeleteMode: false,
     showSettingsModal: false,
     availableModels: [], // 新增：用于存储所有可用模型列表
-    customSystemPrompt: DEFAULT_SYSTEM_PROMPT, // 新增：自定义系统提示词
+    customSystemPrompt: DEFAULT_SYSTEM_PROMPT, // 新增：自定义系统提示词（旧版，用于通用模式）
+    customPrompts: { // 新增：每个模式的自定义提示词
+      general: '',
+      outline: '',
+      writing: '',
+      adjustment: ''
+    },
     enableStream: true, // 新增：是否启用流式传输，默认为 true
     editingMessageId: null, // 新增：用于跟踪正在编辑的消息ID
   },
@@ -221,8 +227,16 @@ const chatSlice = createSlice({
     setCustomSystemPrompt: (state, action) => { // 新增：设置自定义系统提示词
         state.customSystemPrompt = action.payload;
     },
-    resetCustomSystemPrompt: (state) => { // 新增：重置自定义系统提示词
+    resetCustomSystemPrompt: (state) => { // 新增：重置自定义系统提示词（旧版）
         state.customSystemPrompt = DEFAULT_SYSTEM_PROMPT;
+    },
+    setCustomPromptForMode: (state, action) => { // 新增：设置特定模式的自定义提示词
+        const { mode, prompt } = action.payload;
+        state.customPrompts[mode] = prompt;
+    },
+    resetCustomPromptForMode: (state, action) => { // 新增：重置特定模式的自定义提示词
+        const { mode } = action.payload;
+        state.customPrompts[mode] = '';
     },
     setEnableStream: (state, action) => { // 新增：设置是否启用流式传输
         state.enableStream = action.payload;
@@ -525,6 +539,8 @@ export const {
   setAvailableModels, // 新增：导出 setAvailableModels
   setCustomSystemPrompt, // 新增：导出 setCustomSystemPrompt
   resetCustomSystemPrompt, // 新增：导出 resetCustomSystemPrompt
+  setCustomPromptForMode, // 新增：导出 setCustomPromptForMode
+  resetCustomPromptForMode, // 新增：导出 resetCustomPromptForMode
   setEnableStream, // 新增：导出 setEnableStream
   deleteMessage,
   startEditing,
