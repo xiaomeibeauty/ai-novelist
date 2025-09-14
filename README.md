@@ -2,7 +2,7 @@
 
 [English Version](README_en.md) | 中文版
 
-![项目截图](images/示例图片.jpg)
+![项目截图](images/示例图片.png)
 ## 项目介绍
 
 青烛（正式名） 是一个基于 Electron 框架构建的桌面应用程序，旨在为用户提供一个AI辅助小说创作的平台。

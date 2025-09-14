@@ -2,7 +2,7 @@
 
 [中文版](README.md) | English Version
 
-![Project Screenshot](images/示例图片.jpg)
+![Project Screenshot](images/示例图片.png)
 ## Project Introduction
 
 Qingzhu (Official Name) is a desktop application built on the Electron framework, aiming to provide users with an AI-assisted novel creation platform.

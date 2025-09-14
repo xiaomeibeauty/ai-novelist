@@ -43,7 +43,6 @@ db/
 
 # Static assets (unless they are source files)
 public/
-images/
 
 # Build outputs and temporary files
 *.tmp
