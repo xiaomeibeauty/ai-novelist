@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import useIpcRenderer from '../hooks/useIpcRenderer';
+import NotificationModal from './NotificationModal';
+import ConfirmationModal from './ConfirmationModal';
 import './CustomProviderSettings.css';
 
 const CustomProviderSettings = () => {
-    const { getStoreValue, setStoreValue } = useIpcRenderer();
+    const { getStoreValue, setStoreValue, reinitializeModelProvider } = useIpcRenderer();
     const [providers, setProviders] = useState([]);
     const [editingProvider, setEditingProvider] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
+    const [showNotification, setShowNotification] = useState(false);
+    const [notificationMessage, setNotificationMessage] = useState('');
+    const [showConfirmation, setShowConfirmation] = useState(false);
+    const [confirmationMessage, setConfirmationMessage] = useState('');
+    const [onConfirmCallback, setOnConfirmCallback] = useState(() => () => {});
+    const [onCancelCallback, setOnCancelCallback] = useState(() => () => {});
 
     const loadProviders = useCallback(async () => {
         const storedProviders = await getStoreValue('customProviders') || [];
@@ -19,7 +27,23 @@ const CustomProviderSettings = () => {
 
     const handleSave = async (providersToSave) => {
         await setStoreValue('customProviders', providersToSave);
-        alert('自定义提供商设置已保存！请重启应用以使更改生效。');
+        
+        // 尝试重新初始化模型提供者，而不是要求重启应用
+        try {
+            const result = await reinitializeModelProvider();
+            if (result.success) {
+                setNotificationMessage('自定义提供商设置已保存！模型提供者已重新初始化，现在可以使用新的API密钥。');
+                setShowNotification(true);
+            } else {
+                setNotificationMessage('自定义提供商设置已保存，但重新初始化模型提供者失败。可能需要重启应用。');
+                setShowNotification(true);
+            }
+        } catch (error) {
+            console.error('重新初始化模型提供者失败:', error);
+            setNotificationMessage('自定义提供商设置已保存，但重新初始化模型提供者失败。可能需要重启应用。');
+            setShowNotification(true);
+        }
+        
         setEditingProvider(null);
         setIsEditing(false);
     };
@@ -41,13 +65,20 @@ const CustomProviderSettings = () => {
     };
     
     const handleDelete = async (providerNameToDelete) => {
-        if (window.confirm(`确定要删除提供商 "${providerNameToDelete}" 吗？`)) {
+        setConfirmationMessage(`确定要删除提供商 "${providerNameToDelete}" 吗？`);
+        setOnConfirmCallback(() => async () => {
             const updatedProviders = providers.filter(p => p.providerName !== providerNameToDelete);
             setProviders(updatedProviders);
             // 直接保存更新后的列表
             await setStoreValue('customProviders', updatedProviders);
-            alert('提供商已删除。');
-        }
+            setNotificationMessage('提供商已删除。');
+            setShowNotification(true);
+            setShowConfirmation(false);
+        });
+        setOnCancelCallback(() => () => {
+            setShowConfirmation(false);
+        });
+        setShowConfirmation(true);
     };
 
     const handleCancel = () => {
@@ -97,6 +128,21 @@ const CustomProviderSettings = () => {
                         <button type="button" onClick={handleCancel}>取消</button>
                     </div>
                 </form>
+                
+                {showNotification && (
+                    <NotificationModal
+                        message={notificationMessage}
+                        onClose={() => setShowNotification(false)}
+                    />
+                )}
+                
+                {showConfirmation && (
+                    <ConfirmationModal
+                        message={confirmationMessage}
+                        onConfirm={onConfirmCallback}
+                        onCancel={onCancelCallback}
+                    />
+                )}
             </div>
         );
     }
@@ -116,6 +162,21 @@ const CustomProviderSettings = () => {
                     </li>
                 ))}
             </ul>
+            
+            {showNotification && (
+                <NotificationModal
+                    message={notificationMessage}
+                    onClose={() => setShowNotification(false)}
+                />
+            )}
+            
+            {showConfirmation && (
+                <ConfirmationModal
+                    message={confirmationMessage}
+                    onConfirm={onConfirmCallback}
+                    onCancel={onCancelCallback}
+                />
+            )}
         </div>
     );
 };

@@ -9,6 +9,7 @@ const CheckpointPanel = ({ onClose }) => {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [success, setSuccess] = useState(null);
     const [showConfirmation, setShowConfirmation] = useState(false);
     const [confirmationMessage, setConfirmationMessage] = useState('');
     const [onConfirm, setOnConfirm] = useState(null);
@@ -57,6 +58,9 @@ const CheckpointPanel = ({ onClose }) => {
             try {
                 await restoreNovelArchive(currentTaskId, archiveId);
                 dispatch(triggerChapterRefresh());
+                setSuccess('存档恢复成功！');
+                // 3秒后自动隐藏成功提示
+                setTimeout(() => setSuccess(null), 3000);
             } catch (err) {
                 setError('恢复存档失败。');
                 console.error(err);
@@ -98,6 +102,7 @@ const CheckpointPanel = ({ onClose }) => {
                     {onClose && <button onClick={onClose} className="button-secondary">退出</button>}
                 </div>
                 {error && <div className="error-message">{error}</div>}
+                {success && <div className="success-message">{success}</div>}
                 <ul className="checkpoint-history">
                     {history.map((item) => (
                         <li key={item.id}>

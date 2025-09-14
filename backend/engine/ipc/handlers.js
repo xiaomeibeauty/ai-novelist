@@ -1,9 +1,11 @@
-const { ipcMain, app } = require('electron');
+const { ipcMain, app, dialog, shell } = require('electron');
 const isDev = require('electron-is-dev');
 const logger = require('../../utils/logger');
 const { getAiChatHistoryFilePath } = require('../../utils/logger'); // 修改
-const chatService = require('../chatService'); // 引入 chatService
-const { getModelRegistry, initializeModelProvider } = require('../models/modelProvider'); // 修正路径
+const chatService = require('../chatService'); // 引入 chatService（通用模式专用）
+const simpleChatService = require('../simpleChatService'); // 引入 simpleChatService（其他模式专用）
+const { getModelRegistry, initializeModelProvider, reinitializeModelProvider } = require('../models/modelProvider'); // 修正路径
+const contextManager = require('../contextManager'); // 新增：引入上下文管理器
 let serviceRegistry = null;
 const path = require('path');
 
@@ -28,12 +30,151 @@ const handleClearAiConversation = async () => { // 修改函数名
 const fs = require('fs').promises;
 const toolExecutor = require('../../tool-service/tools/executor');
 const tools = require('../../tool-service/tools/definitions'); // 引入 tools 定义，用于 send-user-response
-const { state, setMainWindow } = require('../../state-manager');
+const { state, setMainWindow, setSessionState, getSessionState } = require('../../state-manager');
 const { getFileTree } = require('../../utils/file-tree-builder');
+const knowledgeBaseManager = require('../../rag-service/knowledgeBaseManager'); // 新增：导入知识库管理器
+const ragIpcHandler = require('../../rag-service/ragIpcHandler'); // 新增：导入RAG IPC处理器
+const intentAnalysisIpcHandler = require('../../rag-service/IntentAnalysisIpcHandler'); // 新增：导入意图分析IPC处理器
+const ripgrepService = require('../../tool-service/ripgrep-service'); // 新增：导入ripgrep服务
 
 let storeInstance = null; // 新增：用于 electron-store 实例
 const checkpointService = require('../../../dist-backend/checkpoint-service'); // 引入编译后的 Checkpoint 服务
 
+
+// 新增：设置上下文限制设置
+const handleSetContextLimitSettings = async (event, data) => {
+  try {
+    console.log('[handlers.js] 收到上下文设置保存请求');
+    console.log('[handlers.js] 传入的数据:', JSON.stringify(data, null, 2));
+    
+    // 提取实际的settings对象（前端传递的是 {settings: {...}}）
+    const settings = data.settings || data;
+    console.log('[handlers.js] 提取的设置:', JSON.stringify(settings, null, 2));
+    
+    // 验证设置
+    if (!contextManager.validateContextSettings(settings)) {
+      console.error('[handlers.js] 上下文设置验证失败');
+      console.error('[handlers.js] 设置详情:', settings);
+      return { success: false, error: '无效的上下文设置格式' };
+    }
+
+    console.log('[handlers.js] 上下文设置验证通过');
+
+    // 确保storeInstance已初始化
+    if (!storeInstance) {
+      console.error('[ERROR] storeInstance未初始化！这表示register()函数没有被正确调用');
+      console.error('[ERROR] 上下文设置无法保存，因为store实例不存在');
+      return { success: false, error: '存储实例未初始化，无法保存设置' };
+    }
+
+    // 保存到electron-store
+    console.log('[handlers.js] 正在保存到electron-store...');
+    storeInstance.set('contextLimitSettings', settings);
+    console.log('[handlers.js] 上下文限制设置已保存到electron-store');
+
+    // 验证保存是否成功
+    const savedSettings = storeInstance.get('contextLimitSettings');
+    console.log('[handlers.js] 从electron-store读取验证:', savedSettings);
+    
+    if (savedSettings) {
+      console.log('[handlers.js] 保存验证成功');
+    } else {
+      console.error('[handlers.js] 保存验证失败 - 从存储读取为空');
+    }
+
+    return { success: true, settings };
+  } catch (error) {
+    console.error('[handlers.js] 设置上下文限制失败:', error);
+    console.error('[handlers.js] 错误堆栈:', error.stack);
+    return { success: false, error: error.message };
+  }
+};
+
+// 新增：设置RAG检索启用状态
+const handleSetRagRetrievalEnabled = async (event, mode, enabled) => {
+  try {
+    console.log(`[handlers.js] 设置RAG检索状态: mode=${mode}, enabled=${enabled}`);
+    
+    // 确保storeInstance已初始化
+    if (!storeInstance) {
+      console.error('[ERROR] storeInstance未初始化！无法保存RAG设置');
+      return { success: false, error: '存储实例未初始化，无法保存设置' };
+    }
+
+    // 获取当前的模式功能设置
+    let modeFeatureSettings = storeInstance.get('modeFeatureSettings') || {};
+    
+    // 确保该模式的对象存在
+    if (!modeFeatureSettings[mode]) {
+      modeFeatureSettings[mode] = {};
+    }
+    
+    // 更新RAG检索设置
+    modeFeatureSettings[mode].ragRetrievalEnabled = enabled;
+    
+    // 保存到存储
+    storeInstance.set('modeFeatureSettings', modeFeatureSettings);
+    
+    console.log(`[handlers.js] RAG检索状态已保存: mode=${mode}, enabled=${enabled}`);
+    console.log(`[handlers.js] 当前所有模式设置:`, JSON.stringify(modeFeatureSettings, null, 2));
+    
+    return { success: true, mode, enabled };
+  } catch (error) {
+    console.error('[handlers.js] 设置RAG检索状态失败:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// 新增：获取上下文限制设置
+const handleGetContextLimitSettings = async () => {
+  try {
+    let settings = null;
+    
+    // 确保storeInstance已初始化
+    if (!storeInstance) {
+      console.warn('[WARNING] storeInstance未初始化，返回默认上下文设置');
+      // 返回默认设置而不是错误
+      return {
+        success: true,
+        settings: {
+          modes: {
+            general: {
+              chatContext: { type: 'turns', value: 20 },
+              ragContext: { type: 'turns', value: 10 }
+            },
+            outline: {
+              chatContext: { type: 'turns', value: 30 },
+              ragContext: { type: 'turns', value: 15 }
+            },
+            writing: {
+              chatContext: { type: 'turns', value: 20 },
+              ragContext: { type: 'turns', value: 15 }
+            },
+            adjustment: {
+              chatContext: { type: 'turns', value: 15 },
+              ragContext: { type: 'turns', value: 8 }
+            }
+          }
+        }
+      };
+    }
+
+    // 从electron-store获取设置
+    settings = storeInstance.get('contextLimitSettings');
+    console.log('[handlers.js] 从electron-store获取上下文限制设置:', settings);
+
+    // 如果没有保存的设置，使用默认设置
+    if (!settings) {
+      settings = contextManager.defaultSettings;
+      console.log('[handlers.js] 使用默认上下文限制设置');
+    }
+
+    return { success: true, settings };
+  } catch (error) {
+    console.error('[handlers.js] 获取上下文限制设置失败:', error);
+    return { success: false, error: error.message };
+  }
+};
 // 辅助函数：生成唯一的文件或文件夹名称
 const generateUniqueName = async (targetDir, originalFullName, isFolder) => {
     let baseName = path.basename(originalFullName, path.extname(originalFullName));
@@ -78,6 +219,11 @@ const getCheckpointDirs = async () => {
 // 检查并自动发送批量结果
 const checkAndAutoSendBatchResults = async () => {
     console.log(`[main.js] checkAndAutoSendBatchResults: 开始检查。当前 pendingToolCalls 长度: ${state.pendingToolCalls.length}`);
+    
+    // 详细记录每个工具的状态
+    state.pendingToolCalls.forEach((tool, index) => {
+        console.log(`[main.js] 工具 ${index}: ID=${tool.toolCallId}, 名称=${tool.toolName}, 状态=${tool.status}`);
+    });
     const allProcessed = state.pendingToolCalls.every(tool =>
         tool.status === 'executed' ||
         tool.status === 'failed' ||
@@ -102,7 +248,7 @@ const checkAndAutoSendBatchResults = async () => {
            const Store = StoreModule.default;
            storeInstance = new Store();
        }
-       const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+       const defaultModelId = storeInstance.get('selectedModel') || '';
 
        try {
            const resultsToSend = completedTools.map(tool => ({
@@ -113,9 +259,29 @@ const checkAndAutoSendBatchResults = async () => {
            }));
            
            console.log('[main.js] 准备调用 chatService.sendToolResultToAI 发送批量结果。');
+           
+           // 从工具结果中获取 sessionId（优先使用第一个有效的结果）
+           const sessionIdFromTools = resultsToSend.find(tool => tool.sessionId)?.sessionId;
+           
+           // 获取会话状态信息
+           let sessionState = { mode: 'general' };
+           if (sessionIdFromTools) {
+               sessionState = getSessionState(sessionIdFromTools) || sessionState;
+           }
+           
+           // 工具功能状态已移除，通用模式始终启用工具功能
+           const isGeneralMode = sessionState.mode === 'general';
+           console.log(`[main.js] 会话状态: mode=${sessionState.mode}, 工具功能: ${isGeneralMode ? '启用(通用模式)' : '禁用(其他模式)'}`);
+           console.log(`[main.js] 准备发送工具结果给AI，工具数量: ${resultsToSend.length}`);
+           
            // **关键重构**: 调用新的流式生成器并处理其返回的块
            // **关键重构**: chatService 现在从其内部状态获取流式设置
-           const stream = chatService.sendToolResultToAI(resultsToSend, defaultModelId);
+           const stream = chatService.sendToolResultToAI(
+               resultsToSend,
+               defaultModelId,
+               null, // customSystemPrompt
+               sessionState.mode // mode
+           );
            let hasNewPendingTools = false;
            
            // 获取当前会话ID，用于发送给前端
@@ -162,6 +328,52 @@ const checkAndAutoSendBatchResults = async () => {
     }
 };
 
+// 新增：处理添加文件到知识库的请求
+const handleAddFileToKb = async (event) => {
+    try {
+        const { canceled, filePaths } = await dialog.showOpenDialog(state.mainWindow, {
+            properties: ['openFile'],
+            filters: [
+                { name: 'Documents', extensions: ['txt', 'md', 'pdf', 'docx'] }
+            ]
+        });
+
+        if (canceled || !filePaths || filePaths.length === 0) {
+            return { success: false, message: '用户取消了文件选择。' };
+        }
+
+        const filePath = filePaths[0];
+        const result = await knowledgeBaseManager.addFileToKnowledgeBase(filePath);
+        return result;
+
+    } catch (error) {
+        console.error('[handlers.js] 添加文件到知识库失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// 新增：处理列出知识库文件请求
+const handleListKbFiles = async () => {
+    try {
+        const result = await knowledgeBaseManager.listFiles();
+        return { success: true, files: result };
+    } catch (error) {
+        console.error('[handlers.js] 列出知识库文件失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// 新增：处理删除知识库文件请求
+const handleDeleteKbFile = async (event, filename) => {
+    try {
+        const result = await knowledgeBaseManager.deleteFile(filename);
+        return result;
+    } catch (error) {
+        console.error('[handlers.js] 删除知识库文件失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
 // 处理工具取消请求
 const handleCancelTool = async (event, toolName, toolArgs, toolCallId) => {
     console.log(`收到取消工具请求: ${toolName}，参数:`, toolArgs);
@@ -178,6 +390,12 @@ const handleCancelTool = async (event, toolName, toolArgs, toolCallId) => {
 // Unified tool action handler for both single and batch actions from the new UI
 const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
     console.log(`[handlers.js] 收到 'process-tool-action' 请求。actionType: ${actionType}, toolCalls 数量: ${toolCalls ? toolCalls.length : 0}`);
+    
+    // 记录当前工具使用状态
+    console.log(`[handlers.js] handleProcessToolAction - 当前工具状态检查:`);
+    console.log(`  当前 pendingToolCalls 数量: ${state.pendingToolCalls.length}`);
+    console.log(`  当前会话状态:`, state.conversationHistory.length > 0 ?
+        `会话ID: ${state.conversationHistory[0].sessionId}` : '无会话');
 
     if (!toolCalls || toolCalls.length === 0) {
         // 在前端，状态已经改变，这里只是记录一个警告
@@ -289,7 +507,12 @@ const handleProcessToolAction = async (event, { actionType, toolCalls }) => {
         return { success: false, message: '未知的工具动作。' };
     }
 
+    console.log(`[handlers.js] handleProcessToolAction: 工具动作处理完成，准备检查批量结果`);
     await checkAndAutoSendBatchResults();
+    
+    // 记录处理完成后的状态
+    console.log(`[handlers.js] handleProcessToolAction: 处理完成 - pendingToolCalls 数量: ${state.pendingToolCalls.length}`);
+    
     return { success: true, message: `批量工具动作 '${actionType}' 已处理。` };
 };
 
@@ -304,9 +527,27 @@ const handleSendBatchToolResults = async (event, processedTools) => {
             const Store = StoreModule.default;
             storeInstance = new Store();
         }
-        const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+        const defaultModelId = storeInstance.get('selectedModel') || '';
 
-        const aiResponseResult = await chatService.sendToolResultToAI(processedTools, defaultModelId); // 修改并添加 modelId 参数
+        // 从处理后的工具中获取 sessionId（优先使用第一个有效的结果）
+        const sessionIdFromTools = processedTools.find(tool => tool.sessionId)?.sessionId;
+        
+        // 获取会话状态信息
+        let sessionState = { mode: 'general' };
+        if (sessionIdFromTools) {
+            sessionState = getSessionState(sessionIdFromTools) || sessionState;
+        }
+        
+        // 工具功能状态已移除，通用模式始终启用工具功能
+        const isGeneralMode = sessionState.mode === 'general';
+        console.log(`[handleSendBatchToolResults] 会话状态: mode=${sessionState.mode}, 工具功能: ${isGeneralMode ? '启用(通用模式)' : '禁用(其他模式)'}`);
+
+        const aiResponseResult = await chatService.sendToolResultToAI(
+            processedTools,
+            defaultModelId,
+            null, // customSystemPrompt
+            sessionState.mode // mode
+        ); // 修改并添加 modelId 参数
         state.pendingToolCalls = [];
         chatService._sendAiResponseToFrontend('batch_processing_complete', null); // 修改
         return { success: true, message: '批量工具结果已成功反馈给 AI。' };
@@ -318,9 +559,35 @@ const handleSendBatchToolResults = async (event, processedTools) => {
 };
 
 // 处理用户命令
-const handleProcessCommand = async (event, { message, sessionId, currentMessages, mode, customPrompt }) => {
-    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}", Mode: ${mode}, Custom Prompt: "${customPrompt}"`);
+const handleProcessCommand = async (event, { message, sessionId, currentMessages, mode, customPrompt, toolUsageEnabled, ragRetrievalEnabled, model }) => {
+    console.log(`[handlers.js] handleProcessCommand: Received command: "${message}", Mode: ${mode}, Custom Prompt: "${customPrompt}", RAG Retrieval Enabled: ${ragRetrievalEnabled}, Model: ${model}`);
     console.log(`[handlers.js] Custom Prompt type: ${typeof customPrompt}, length: ${customPrompt ? customPrompt.length : 0}`);
+    
+    // 根据模式选择服务：通用模式使用chatService，其他模式使用simpleChatService
+    const isGeneralMode = mode === 'general';
+    const targetService = isGeneralMode ? chatService : simpleChatService;
+    
+    console.log(`[handlers.js] 模式路由: ${mode} -> ${isGeneralMode ? 'chatService (通用模式)' : 'simpleChatService (其他模式)'}`);
+    
+    // 优先使用存储中的模型设置，而不是前端传递的模型参数
+    let finalModel = model;
+    try {
+        if (!storeInstance) {
+            const StoreModule = await import('electron-store');
+            const Store = StoreModule.default;
+            storeInstance = new Store();
+        }
+        
+        const storedModel = storeInstance.get('selectedModel');
+        if (storedModel) {
+            console.log(`[handlers.js] 使用存储中的模型设置: ${storedModel} (替代前端传递的: ${model})`);
+            finalModel = storedModel;
+        } else {
+            console.log(`[handlers.js] 存储中没有模型设置，使用前端传递的模型: ${model}`);
+        }
+    } catch (error) {
+        console.error(`[handlers.js] 获取存储模型设置失败，使用前端模型: ${model}`, error);
+    }
     
     // Check if it's the start of a new conversation to initialize checkpoint
     const isNewTask = !currentMessages || currentMessages.filter(m => m.role === 'user').length === 0;
@@ -333,7 +600,7 @@ const handleProcessCommand = async (event, { message, sessionId, currentMessages
 
             // Send the initial checkpoint to the frontend
             if (initResult.success && initResult.checkpointId) {
-                chatService._sendAiResponseToFrontend('initial-checkpoint-created', {
+                targetService._sendAiResponseToFrontend('initial-checkpoint-created', {
                     checkpointId: initResult.checkpointId,
                     message: '初始状态已存档'
                 });
@@ -346,9 +613,18 @@ const handleProcessCommand = async (event, { message, sessionId, currentMessages
         }
     }
 
-    await chatService.processUserMessage(message, sessionId, currentMessages, mode, customPrompt);
+    // 保存会话状态信息（移除toolUsageEnabled，因为现在根据模式硬编码）
+    setSessionState(sessionId, {
+      mode: mode,
+      ragRetrievalEnabled: ragRetrievalEnabled,
+      model: finalModel,
+      customPrompt: customPrompt
+    });
+    
+    // 调用相应的服务处理消息
+    await targetService.processUserMessage(message, sessionId, currentMessages, mode, customPrompt, ragRetrievalEnabled, finalModel);
+    return { success: true };
 };
- 
 // 新的、修复后的用户问题回复处理器
 const handleUserQuestionResponse = async (event, { response, toolCallId }) => {
     console.log(`[handlers.js] 收到用户问题回复: "${response}", 关联 toolCallId: ${toolCallId}`);
@@ -373,13 +649,29 @@ const handleUserQuestionResponse = async (event, { response, toolCallId }) => {
             const Store = StoreModule.default;
             storeInstance = new Store();
         }
-        const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+        const defaultModelId = storeInstance.get('selectedModel') || '';
         // 不再从存储中读取旧版自定义提示词，使用前端传递的参数
 
-        // **关键修复**: 调用新的流式 sendToolResultToAI 并正确处理其输出
-        const stream = chatService.sendToolResultToAI(toolResultsArray, defaultModelId);
-        
+        // 从会话历史中获取 sessionId
         const sessionId = state.conversationHistory.length > 0 ? state.conversationHistory.find(m => m.sessionId)?.sessionId : null;
+        
+        // 获取会话状态信息
+        let sessionState = { mode: 'general' };
+        if (sessionId) {
+            sessionState = getSessionState(sessionId) || sessionState;
+        }
+        
+        // 工具功能状态已移除，通用模式始终启用工具功能
+        const isGeneralMode = sessionState.mode === 'general';
+        console.log(`[handleUserQuestionResponse] 会话状态: mode=${sessionState.mode}, 工具功能: ${isGeneralMode ? '启用(通用模式)' : '禁用(其他模式)'}`);
+
+        // **关键修复**: 调用新的流式 sendToolResultToAI 并正确处理其输出
+        const stream = chatService.sendToolResultToAI(
+            toolResultsArray,
+            defaultModelId,
+            null, // customSystemPrompt
+            sessionState.mode // mode
+        );
 
         for await (const chunk of stream) {
             if (chunk.type === 'text') {
@@ -420,7 +712,7 @@ const getChaptersAndUpdateFrontend = async (mainWindow) => {
     const novelDirPath = getNovelPath();
     try {
         await fs.mkdir(novelDirPath, { recursive: true }).catch(() => {}); // 确保目录存在
-        const fileTreeResult = await getFileTree(getNovelPath()); // 使用新的文件树构建函数
+        const fileTreeResult = await getFileTree(novelDirPath); // 使用新的文件树构建函数
         let chapters = [];
         if (fileTreeResult.success) {
             // 将文件树的 children 数组作为 chapters 返回
@@ -483,6 +775,55 @@ const handleListNovelFiles = async () => {
         return { success: false, error: error.message };
     }
 };
+// 处理搜索novel文件夹中的文件内容
+const handleSearchNovelFiles = async (event, searchQuery) => {
+    try {
+        const novelDirPath = getNovelPath();
+        console.log(`[handleSearchNovelFiles] 搜索novel目录: ${novelDirPath}, 查询: ${searchQuery}`);
+        
+        // 使用ripgrep搜索文件内容
+        const searchResults = await ripgrepService.regexSearchFiles(
+            novelDirPath,
+            novelDirPath,
+            searchQuery,
+            '*' // 搜索所有文件
+        );
+
+        // 解析搜索结果并返回格式化的结果
+        const results = parseSearchResults(searchResults, novelDirPath);
+        return { success: true, results };
+    } catch (error) {
+        console.error('[handleSearchNovelFiles] 搜索novel文件时发生异常:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// 解析ripgrep搜索结果
+function parseSearchResults(searchOutput, novelDirPath) {
+    const results = [];
+    const lines = searchOutput.split('\n');
+    let currentFile = null;
+    
+    for (const line of lines) {
+        if (line.startsWith('# ')) {
+            // 文件路径行
+            const filePath = line.substring(2).trim();
+            currentFile = {
+                name: path.basename(filePath),
+                path: filePath,
+                preview: ''
+            };
+            results.push(currentFile);
+        } else if (line.trim() && !line.startsWith('---') && currentFile) {
+            // 内容行，添加到预览
+            if (currentFile.preview.length < 100) { // 限制预览长度
+                currentFile.preview += line.trim() + ' ';
+            }
+        }
+    }
+    
+    return results;
+}
 
 // 处理获取章节列表请求 (供渲染进程直接调用，例如首次加载)
 const handleGetChapters = async () => {
@@ -598,6 +939,10 @@ const handleDeleteItem = async (event, itemId) => {
             return { success: true, message: `文件夹 '${itemId}' 及其内容删除成功` };
         } else {
             await fs.unlink(itemPath); // 删除文件
+            // 发送文件删除事件通知前端更新标签页状态
+            if (state.mainWindow && !state.mainWindow.isDestroyed() && state.mainWindow.webContents) {
+                state.mainWindow.webContents.send('file-deleted', { filePath: itemId });
+            }
             return { success: true, message: `文件 '${itemId}' 删除成功` };
         }
     } catch (error) {
@@ -629,6 +974,14 @@ const handleRenameItem = async (event, oldItemId, newItemName) => {
 
     try {
         await fs.rename(oldItemPath, newItemPath);
+        // 发送文件重命名事件通知前端更新标签页状态
+        if (state.mainWindow && !state.mainWindow.isDestroyed() && state.mainWindow.webContents) {
+            const relativeNewItemPath = path.relative(novelRootPath, newItemPath).replace(/\\/g, '/');
+            state.mainWindow.webContents.send('file-renamed', {
+                oldFilePath: oldItemId,
+                newFilePath: relativeNewItemPath
+            });
+        }
         await getChaptersAndUpdateFrontend(state.mainWindow); // 始终更新前端
         // 返回新的相对路径，以便前端更新当前文件
         const relativeNewItemPath = path.relative(novelRootPath, newItemPath).replace(/\\/g, '/');
@@ -724,18 +1077,31 @@ const handleMoveItem = async (event, sourceId, targetFolderId) => {
 // 处理更新小说文件标题请求
 const handleUpdateNovelTitle = async (event, { oldFilePath, newTitle }) => {
     const novelDirPath = getNovelPath();
-    const oldFullPath = path.join(novelDirPath, path.basename(oldFilePath)); // 确保只取文件名
+    // 处理 oldFilePath：移除 'novel/' 前缀（如果存在），然后构建完整路径
+    const cleanOldFilePath = oldFilePath.startsWith('novel/') ? oldFilePath.substring(6) : oldFilePath;
+    const oldFullPath = path.join(novelDirPath, cleanOldFilePath);
     // 清理新标题以确保文件名合法
     const sanitize = (name) => name.replace(/[<>:"/\\|?*]/g, '_');
     const sanitizedNewTitle = sanitize(newTitle);
-    const newFullPath = path.join(novelDirPath, `${sanitizedNewTitle}.txt`);
+    
+    // 构建新文件的完整路径，保持原有的目录结构
+    const oldDir = path.dirname(cleanOldFilePath);
+    const newFullPath = oldDir !== '.' ?
+        path.join(novelDirPath, oldDir, `${sanitizedNewTitle}.txt`) :
+        path.join(novelDirPath, `${sanitizedNewTitle}.txt`);
 
     console.log(`[handlers.js] handleUpdateNovelTitle: 尝试将 '${oldFullPath}' 重命名为 '${newFullPath}'`);
     try {
         await fs.rename(oldFullPath, newFullPath); // 重命名文件
         await getChaptersAndUpdateFrontend(state.mainWindow); // 更新前端章节列表
 
-        return { success: true, newFilePath: `novel/${sanitizedNewTitle}.txt`, message: `文件 '${path.basename(oldFilePath)}' 已重命名为 '${sanitizedNewTitle}.txt'` };
+        // 构建新的相对文件路径，保持原有的目录结构
+        const oldDir = path.dirname(cleanOldFilePath);
+        const newRelativePath = oldDir !== '.' ?
+            `novel/${oldDir}/${sanitizedNewTitle}.txt` :
+            `novel/${sanitizedNewTitle}.txt`;
+        
+        return { success: true, newFilePath: newRelativePath, message: `文件 '${path.basename(oldFilePath)}' 已重命名为 '${sanitizedNewTitle}.txt'` };
     } catch (error) {
         console.error(`[handlers.js] 更新小说文件标题失败: ${oldFilePath} -> ${newTitle}`, error);
         return { success: false, error: error.message };
@@ -875,11 +1241,72 @@ const handleListAllModels = async () => {
     }
 };
 
+// 新增：处理重新检测Ollama服务请求
+const handleRedetectOllama = async () => {
+    try {
+        console.log('[handlers.js] 开始重新检测Ollama服务...');
+        
+        // 获取当前的Ollama适配器
+        const modelRegistry = getModelRegistry();
+        const ollamaAdapter = modelRegistry.adapters['ollama'];
+        
+        if (!ollamaAdapter) {
+            return { success: false, error: 'Ollama适配器未找到' };
+        }
+
+        // 尝试重新获取模型列表
+        const models = await ollamaAdapter.listModels();
+        console.log(`[handlers.js] 重新检测Ollama成功，获取到 ${models.length} 个模型`);
+        
+        // 重新注册适配器以更新模型映射
+        await modelRegistry.registerAdapter('ollama', ollamaAdapter);
+        
+        return { success: true, message: `Ollama服务重新检测成功，发现 ${models.length} 个模型` };
+    } catch (error) {
+        console.error('[handlers.js] 重新检测Ollama失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
 // 注册所有IPC处理器
 function register(store) { // 接收 store 参数并设置全局实例
   storeInstance = store; // 设置全局存储实例
   console.log('[handlers.js] register: 开始注册 IPC 处理器...');
   console.log(`[DEBUG] register: storeInstance set, path: ${storeInstance.path}`);
+  
+  // 记录应用启动时的配置状态
+  console.log('[handlers.js] 应用启动配置检查:');
+  try {
+    const modeFeatureSettings = storeInstance.get('modeFeatureSettings');
+    console.log('[handlers.js] 存储中的 modeFeatureSettings:', JSON.stringify(modeFeatureSettings, null, 2));
+    
+    const toolUsageEnabled = storeInstance.get('toolUsageEnabled');
+    console.log('[handlers.js] 存储中的 toolUsageEnabled:', toolUsageEnabled);
+    
+    // 注意：工具功能状态管理已移除，不再初始化相关状态
+    console.log('[handlers.js] 工具功能状态管理已移除，使用硬编码模式路由');
+  } catch (error) {
+    console.error('[handlers.js] 初始化配置状态失败:', error);
+  }
+  
+  // 设置存储实例给RAG相关服务（实现API key自动加载）
+  if (knowledgeBaseManager) {
+      knowledgeBaseManager.setStore(store);
+  }
+  if (ragIpcHandler) {
+      ragIpcHandler.setStore(store);
+  }
+  
+  if (intentAnalysisIpcHandler) {
+      intentAnalysisIpcHandler.setStore(store);
+      intentAnalysisIpcHandler.initialize(store);
+  }
+  
+  // 设置IntentAnalyzer的存储实例
+  const intentAnalyzer = require('../../rag-service/IntentAnalyzer');
+  if (intentAnalyzer && intentAnalyzer.setStore) {
+      intentAnalyzer.setStore(store);
+  }
   // 新增: 处理前端发送的流式设置
   ipcMain.on('set-streaming-mode', (event, payload) => {
     chatService.setStreamingMode(payload);
@@ -892,6 +1319,7 @@ function register(store) { // 接收 store 参数并设置全局实例
   ipcMain.handle('process-command', handleProcessCommand);
   ipcMain.handle('user-question-response', handleUserQuestionResponse);
   ipcMain.handle('list-novel-files', handleListNovelFiles); // 新增：注册列出 novel 目录下所有文件请求
+  ipcMain.handle('search-novel-files', handleSearchNovelFiles); // 新增：注册搜索novel文件请求
   ipcMain.handle('get-chapters', handleGetChapters); // 注册新的IPC处理器
   ipcMain.handle('load-chapter-content', handleLoadChapterContent); // 注册新的IPC处理器
   ipcMain.handle('register-renderer-listeners', handleRegisterRendererListeners); // 注册新的IPC处理器
@@ -909,6 +1337,19 @@ function register(store) { // 接收 store 参数并设置全局实例
   ipcMain.handle('delete-ai-chat-history', handleDeleteAiChatHistory); // 修改 IPC 处理器名称
   ipcMain.handle('clear-ai-conversation', handleClearAiConversation); // 修改 IPC 处理器名称
   ipcMain.handle('list-all-models', handleListAllModels); // 新增：注册获取所有模型列表处理器
+  ipcMain.handle('get-available-models', handleListAllModels); // 新增：注册get-available-models别名处理器
+  ipcMain.handle('redetect-ollama', handleRedetectOllama); // 新增：注册重新检测Ollama服务处理器
+  ipcMain.handle('add-file-to-kb', handleAddFileToKb); // 新增：注册添加文件到知识库的处理器
+  ipcMain.handle('list-kb-files', handleListKbFiles); // 新增：注册列出知识库文件处理器
+  ipcMain.handle('delete-kb-file', handleDeleteKbFile); // 新增：注册删除知识库文件处理器
+  
+
+  // 新增：上下文限制设置处理器
+  ipcMain.handle('set-context-limit-settings', handleSetContextLimitSettings);
+  ipcMain.handle('get-context-limit-settings', handleGetContextLimitSettings);
+
+  // 新增：RAG检索状态设置处理器
+  ipcMain.handle('set-rag-retrieval-enabled', handleSetRagRetrievalEnabled);
 
   // ipcMain.handle('regenerate-response', async (event, { messageId }) => {
   //   try {
@@ -936,28 +1377,63 @@ function register(store) { // 接收 store 参数并设置全局实例
     return await checkpointService.saveArchive(taskId, workspaceDir, shadowDir, message);
   });
 
-  ipcMain.handle('checkpoints:restore', async (event, { taskId, archiveId }) => {
+  // 用于章节列表栏的基于文件复制的存档恢复
+  ipcMain.handle('checkpoints:restoreNovel', async (event, { taskId, archiveId }) => {
     const { workspaceDir, shadowDir } = await getCheckpointDirs();
-    // The 'archiveId' from the frontend is actually the commit hash for the shadow checkpoint service.
-    const restoreResult = await checkpointService.restoreCheckpoint(taskId, workspaceDir, shadowDir, archiveId);
-
-    if (restoreResult.success) {
+    
+    try {
+      // 使用基于文件复制的存档系统恢复章节内容
+      await checkpointService.restoreNovelArchive(taskId, workspaceDir, shadowDir, archiveId);
+      
+      // 恢复成功后处理聊天记录
       try {
         // 在恢复成功后，立即读取并返回该任务的最新聊天记录
         const fullHistory = await handleGetAiChatHistory();
         const taskHistory = fullHistory.find(conv => conv.sessionId === taskId);
         if (taskHistory) {
-          return { ...restoreResult, messages: taskHistory.messages };
+          return { success: true, messages: taskHistory.messages };
         }
         // 如果在历史中未找到该会话，则可能是一个新的或空的会话
-        return { ...restoreResult, messages: [] };
+        return { success: true, messages: [] };
       } catch (error) {
         console.error(`[handlers.js] 恢复存档后读取聊天记录失败 for task ${taskId}:`, error);
         // 即使读取历史失败，也应将恢复成功的信息返回
-        return { ...restoreResult, error: 'File system restored, but failed to reload chat history.' };
+        return { success: true, error: 'File system restored, but failed to reload chat history.' };
       }
+    } catch (error) {
+      console.error(`[handlers.js] 恢复Novel存档失败 for task ${taskId}:`, error);
+      return { success: false, error: error.message };
     }
-    return restoreResult;
+  });
+
+  // 用于聊天栏的Git影子存档恢复
+  ipcMain.handle('checkpoints:restoreChat', async (event, { taskId, archiveId }) => {
+    const { workspaceDir, shadowDir } = await getCheckpointDirs();
+    
+    try {
+      const restoreResult = await checkpointService.restoreCheckpoint(taskId, workspaceDir, shadowDir, archiveId);
+      
+      if (restoreResult.success) {
+        try {
+          // 在恢复成功后，立即读取并返回该任务的最新聊天记录
+          const fullHistory = await handleGetAiChatHistory();
+          const taskHistory = fullHistory.find(conv => conv.sessionId === taskId);
+          if (taskHistory) {
+            return { ...restoreResult, messages: taskHistory.messages };
+          }
+          // 如果在历史中未找到该会话，则可能是一个新的或空的会话
+          return { ...restoreResult, messages: [] };
+        } catch (error) {
+          console.error(`[handlers.js] 恢复存档后读取聊天记录失败 for task ${taskId}:`, error);
+          // 即使读取历史失败，也应将恢复成功的信息返回
+          return { ...restoreResult, error: 'File system restored, but failed to reload chat history.' };
+        }
+      }
+      return restoreResult;
+    } catch (error) {
+      console.error(`[handlers.js] 恢复Git存档失败 for task ${taskId}:`, error);
+      return { success: false, error: error.message };
+    }
   });
 
   ipcMain.handle('checkpoints:delete', async (event, { taskId, archiveId }) => {
@@ -978,35 +1454,49 @@ function register(store) { // 接收 store 参数并设置全局实例
 
 
 
-  // 新增：get-store-value 处理器
+  // 新增：打开外部链接处理器
+  ipcMain.handle('open-external', async (event, url) => {
+    try {
+      console.log(`[handlers.js] 正在打开外部链接: ${url}`);
+      await shell.openExternal(url);
+      return { success: true };
+    } catch (error) {
+      console.error(`[handlers.js] 打开外部链接失败: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // get-store-value 处理器
   ipcMain.handle('get-store-value', async (event, key) => {
     try {
         if (!storeInstance) {
-            console.log(`[DEBUG] get-store-value: storeInstance 未初始化，创建新实例，key: ${key}`);
+            console.error(`[ERROR] get-store-value: storeInstance 未初始化！key: ${key}`);
+            console.error(`[ERROR] 这表示 register() 函数没有被正确调用，或者 store 实例没有正确传递`);
+            // 作为fallback，创建新实例，但这会导致配置同步问题
             const StoreModule = await import('electron-store');
             const Store = StoreModule.default;
             storeInstance = new Store();
-            console.log(`[DEBUG] get-store-value: 新 storeInstance 创建完成，存储路径: ${storeInstance.path}`);
+            console.warn(`[WARNING] get-store-value: 创建了新的 storeInstance 作为fallback，路径: ${storeInstance.path}`);
         } else {
-            console.log(`[DEBUG] get-store-value: 使用现有 storeInstance，key: ${key}`);
+            console.log(`[API设置调试] get-store-value: 使用现有 storeInstance，key: ${key}`);
         }
         const value = storeInstance.get(key);
         
-        // 特别处理 customPrompts 键的详细日志
-        if (key === 'customPrompts') {
-            console.log(`[DEBUG] get-store-value: 获取 customPrompts, 数据类型: ${typeof value}, 值结构:`, value);
-            if (value && typeof value === 'object') {
-                console.log(`[DEBUG] get-store-value: customPrompts 键数量: ${Object.keys(value).length}`);
-                for (const mode in value) {
-                    console.log(`[DEBUG] get-store-value: customPrompts[${mode}]: ${value[mode]}`);
-                }
+        // 特别处理功能状态设置的详细日志
+        const featureKeys = ['modeFeatureSettings', 'toolUsageEnabled', 'ragRetrievalEnabled'];
+        if (featureKeys.includes(key)) {
+            console.log(`[API设置调试] get-store-value: 获取功能设置 key=${key}, value=`, JSON.stringify(value, null, 2));
+        } else {
+            // 特别处理API相关设置的详细日志
+            const apiKeys = ['selectedModel', 'selectedProvider', 'deepseekApiKey', 'openrouterApiKey', 'aliyunEmbeddingApiKey', 'intentAnalysisModel'];
+            if (apiKeys.includes(key)) {
+                console.log(`[API设置调试] get-store-value: 获取API设置 key=${key}, value=`, value);
             }
         }
         
-        console.log(`[DEBUG] get-store-value: 获取 key=${key}, value=`, value);
         return value;
     } catch (error) {
-        console.error(`获取值失败: ${key}`, error);
+        console.error(`[API设置调试] 获取值失败: ${key}`, error);
         return undefined; // 返回 undefined 而不是抛出错误，以便前端处理
     }
   });
@@ -1015,43 +1505,142 @@ function register(store) { // 接收 store 参数并设置全局实例
   ipcMain.handle('set-store-value', async (event, key, value) => {
     try {
         if (!storeInstance) {
-            console.log(`[DEBUG] set-store-value: storeInstance 未初始化，创建新实例，key: ${key}`);
+            console.error(`[ERROR] set-store-value: storeInstance 未初始化！key: ${key}`);
+            console.error(`[ERROR] 这表示 register() 函数没有被正确调用，或者 store 实例没有正确传递`);
+            // 作为fallback，创建新实例，但这会导致配置同步问题
             const StoreModule = await import('electron-store');
             const Store = StoreModule.default;
             storeInstance = new Store();
-            console.log(`[DEBUG] set-store-value: 新 storeInstance 创建完成，存储路径: ${storeInstance.path}`);
+            console.warn(`[WARNING] set-store-value: 创建了新的 storeInstance 作为fallback，路径: ${storeInstance.path}`);
         } else {
-            console.log(`[DEBUG] set-store-value: 使用现有 storeInstance，key: ${key}`);
+            console.log(`[API设置调试] set-store-value: 使用现有 storeInstance，key: ${key}`);
         }
         
-        // 特别处理 customPrompts 键的详细日志
-        if (key === 'customPrompts') {
-            console.log(`[DEBUG] set-store-value: 保存 customPrompts, 数据类型: ${typeof value}, 值结构:`, value);
-            if (value && typeof value === 'object') {
-                console.log(`[DEBUG] set-store-value: customPrompts 键数量: ${Object.keys(value).length}`);
-                for (const mode in value) {
-                    console.log(`[DEBUG] set-store-value: customPrompts[${mode}]: ${value[mode]}`);
-                }
+        // 特别处理功能状态设置的详细日志
+        const featureKeys = ['modeFeatureSettings', 'toolUsageEnabled', 'ragRetrievalEnabled'];
+        if (featureKeys.includes(key)) {
+            console.log(`[API设置调试] set-store-value: 保存功能设置 key=${key}, value=`, JSON.stringify(value, null, 2));
+        } else {
+            // 特别处理API相关设置的详细日志
+            const apiKeys = ['selectedModel', 'selectedProvider', 'deepseekApiKey', 'openrouterApiKey', 'aliyunEmbeddingApiKey', 'intentAnalysisModel'];
+            if (apiKeys.includes(key)) {
+                console.log(`[API设置调试] set-store-value: 保存API设置 key=${key}, value=`, value);
             }
         }
         
-        console.log(`[DEBUG] set-store-value: 保存 key=${key}, value=`, value);
         storeInstance.set(key, value);
         
         // 验证保存是否成功
         const savedValue = storeInstance.get(key);
-        console.log(`[DEBUG] set-store-value: 验证保存 key=${key}, 实际值=`, savedValue);
+        console.log(`[API设置调试] set-store-value: 验证保存 key=${key}, 实际存储值=`, savedValue);
         
-        // 强制写入磁盘并检查文件是否存在
+        // 强制写入磁盘
         await storeInstance.store;
-        console.log(`[DEBUG] set-store-value: 数据已强制写入磁盘`);
+        console.log(`[API设置调试] set-store-value: 数据已强制写入磁盘`);
         
         return { success: true, message: `值已保存: ${key}` };
     } catch (error) {
-        console.error(`保存值失败: ${key}`, error);
+        console.error(`[API设置调试] 保存值失败: ${key}`, error);
         return { success: false, error: error.message };
     }
   });
+
+  // 新增：获取附加信息处理器
+  const handleGetAdditionalInfo = async (mode) => {
+    try {
+      if (!storeInstance) {
+        const StoreModule = await import('electron-store');
+        const Store = StoreModule.default;
+        storeInstance = new Store();
+      }
+      
+      const additionalInfoData = storeInstance.get('additionalInfo') || {};
+      const modeInfo = additionalInfoData[mode];
+      
+      let info;
+      if (typeof modeInfo === 'string') {
+        // 旧格式：字符串，迁移到新格式
+        info = {
+          outline: modeInfo,
+          previousChapter: '',
+          characterSettings: ''
+        };
+        console.log(`[handlers.js] 检测到旧格式附加信息，已迁移到新格式，mode=${mode}`);
+      } else if (typeof modeInfo === 'object' && modeInfo !== null) {
+        // 新格式：对象
+        info = {
+          outline: modeInfo.outline || '',
+          previousChapter: modeInfo.previousChapter || '',
+          characterSettings: modeInfo.characterSettings || ''
+        };
+      } else {
+        // 空数据
+        info = {
+          outline: '',
+          previousChapter: '',
+          characterSettings: ''
+        };
+      }
+      
+      console.log(`[handlers.js] 获取附加信息 mode=${mode}, 各字段长度:`, {
+        outline: info.outline.length,
+        previousChapter: info.previousChapter.length,
+        characterSettings: info.characterSettings.length
+      });
+      return { success: true, info };
+    } catch (error) {
+      console.error('[handlers.js] 获取附加信息失败:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  ipcMain.handle('get-additional-info', async (event, mode) => {
+    return await handleGetAdditionalInfo(mode);
+  });
+
+  // 新增：重新初始化模型提供者处理器
+  const handleReinitializeModelProvider = async () => {
+    try {
+      console.log('[handlers.js] 收到重新初始化模型提供者请求');
+      await reinitializeModelProvider();
+      return { success: true, message: '模型提供者重新初始化成功' };
+    } catch (error) {
+      console.error('[handlers.js] 重新初始化模型提供者失败:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  // 新增：获取默认提示词处理器
+  const handleGetDefaultPrompts = async () => {
+    try {
+      // 导入prompts模块
+      const prompts = require('../prompts');
+      return { success: true, prompts };
+    } catch (error) {
+      console.error('[handlers.js] 获取默认提示词失败:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  ipcMain.handle('get-default-prompts', async () => {
+    return await handleGetDefaultPrompts();
+  });
+
+  // 新增：重新初始化模型提供者处理器
+  ipcMain.handle('reinitialize-model-provider', async () => {
+    return await handleReinitializeModelProvider();
+  });
+
+  // 新增：RAG相关IPC处理器
+  ipcMain.handle('get-embedding-status', async () => {
+    return await ragIpcHandler.getEmbeddingStatus();
+  });
+
+  // 新增：重新初始化阿里云嵌入函数处理器
+  ipcMain.handle('reinitialize-aliyun-embedding', async () => {
+    return await ragIpcHandler.reinitializeAliyunEmbedding();
+  });
+
 
   // 新增：用于接收前端日志并输出到主进程终端
   ipcMain.on('main-log', (event, message) => {
@@ -1068,3 +1657,6 @@ exports.sendUserResponse = handleUserQuestionResponse;
 exports.processToolAction = handleProcessToolAction;
 // exports.processBatchAction = handleProcessBatchAction; // This is now obsolete
 exports.getChaptersAndUpdateFrontend = getChaptersAndUpdateFrontend; // 导出新函数
+exports.handleGetContextLimitSettings = handleGetContextLimitSettings; // 导出上下文限制设置获取函数
+exports.handleSetContextLimitSettings = handleSetContextLimitSettings; // 导出上下文限制设置保存函数
+exports.handleSetRagRetrievalEnabled = handleSetRagRetrievalEnabled; // 导出RAG检索状态设置函数

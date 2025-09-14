@@ -1,13 +1,30 @@
 const ModelRegistry = require('./modelRegistry');
 const DeepSeekAdapter = require('./adapters/deepseekAdapter');
 const OllamaAdapter = require('./adapters/ollamaAdapter');
-const OpenAIAdapter = require('./adapters/openaiAdapter'); // 新增
 const OpenRouterAdapter = require('./adapters/openrouterAdapter');
 const CustomProviderAdapter = require('./adapters/customProviderAdapter'); // 新增
+const AliyunEmbeddingFunction = require('../../rag-service/aliyunEmbeddingFunction'); // 新增：阿里云嵌入函数
 
 let modelRegistryInstance = null;
 let storeInstance = null; // 用于存储 electron-store 实例
 let initializationPromise = null; // 新增：用于跟踪初始化过程的 Promise
+
+/**
+ * 重新初始化模型提供者，重新加载所有API密钥和配置
+ * 这个函数应该在API密钥更新后调用
+ * @returns {Promise<ModelRegistry>} 重新配置的 ModelRegistry 实例
+ */
+async function reinitializeModelProvider() {
+    console.log("重新初始化模型提供者...");
+    
+    // 重置实例和Promise，强制重新初始化
+    modelRegistryInstance = null;
+    initializationPromise = null;
+    storeInstance = null; // 重置存储实例以确保重新读取最新值
+    
+    // 重新初始化
+    return await initializeModelProvider();
+}
 
 /**
  * 初始化并配置 ModelRegistry。
@@ -32,9 +49,16 @@ async function initializeModelProvider() { // 修改为 async 函数
         const StoreModule = await import('electron-store');
         const Store = StoreModule.default;
         storeInstance = new Store();
+        console.log('[API设置调试] electron-store实例已创建');
     }
+    
     const deepseekApiKey = storeInstance.get('deepseekApiKey'); // 从 electron-store 获取 API Key
     const deepseekBaseUrl = storeInstance.get('deepseekBaseUrl') || 'https://api.deepseek.com/v1'; // 从 electron-store 获取 baseURL，提供默认值
+    
+    console.log('[API设置调试] 从存储加载的DeepSeek配置:', {
+        apiKey: deepseekApiKey ? '已设置' : '未设置',
+        baseUrl: deepseekBaseUrl
+    });
 
     // 实例化具体的模型适配器
     // DeepSeek 适配器
@@ -46,17 +70,6 @@ async function initializeModelProvider() { // 修改为 async 函数
         console.warn("DeepSeek API Key 未设置，但 DeepSeekAdapter 已注册。");
     }
 
-    // OpenAI 适配器
-    const openaiApiKey = storeInstance.get('openaiApiKey'); // 从 electron-store 获取 API Key
-    const openaiBaseUrl = storeInstance.get('openaiBaseUrl') || 'https://api.openai.com/v1'; // 从 electron-store 获取 baseURL，提供默认值
-
-    const openaiAdapter = new OpenAIAdapter(openaiApiKey, openaiBaseUrl);
-    await modelRegistryInstance.registerAdapter('openai', openaiAdapter);
-    if (openaiApiKey) {
-        console.log("OpenAIAdapter 已注册。");
-    } else {
-        console.warn("OpenAI API Key 未设置，但 OpenAIAdapter 已注册。");
-    }
 
     // Ollama 配置
     const ollamaBaseUrl = storeInstance.get('ollamaBaseUrl') || 'http://localhost:11434'; // 从 electron-store 获取 baseURL，提供默认值
@@ -75,6 +88,11 @@ async function initializeModelProvider() { // 修改为 async 函数
     // OpenRouter 适配器
     const openrouterApiKey = storeInstance.get('openrouterApiKey');
     const openrouterBaseUrl = storeInstance.get('openrouterBaseUrl'); // 可选
+    
+    console.log('[API设置调试] 从存储加载的OpenRouter配置:', {
+        apiKey: openrouterApiKey ? '已设置' : '未设置',
+        baseUrl: openrouterBaseUrl || '使用默认'
+    });
 
     try {
         const openrouterAdapter = new OpenRouterAdapter({
@@ -107,6 +125,14 @@ async function initializeModelProvider() { // 修改为 async 函数
         }
     }
 
+    // 阿里云嵌入API Key检查（仅用于日志记录，不注册为模型适配器）
+    const aliyunEmbeddingApiKey = storeInstance.get('aliyunEmbeddingApiKey');
+    if (aliyunEmbeddingApiKey) {
+        console.log("阿里云嵌入API Key已设置，嵌入功能可用");
+    } else {
+        console.warn("阿里云API Key未设置，阿里云嵌入功能将不可用");
+    }
+
     console.log("ModelProvider 初始化完成，ModelRegistry 已配置。");
     initializationPromise = null; // 清除 Promise 引用
     return modelRegistryInstance;
@@ -128,5 +154,6 @@ function getModelRegistry() {
 
 module.exports = {
     initializeModelProvider,
-    getModelRegistry
+    getModelRegistry,
+    reinitializeModelProvider
 };

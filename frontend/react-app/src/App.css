@@ -187,9 +187,6 @@ button#sendMessage:hover {
 }
 
 /* 工具卡片样式 */
-#batch-tool-suggestions-container {
-  /* 已经在 App.js 中定义了 inline style，这里只做补充 */
-}
 
 .tool-suggestion {
   border: 1px solid var(--border-color);

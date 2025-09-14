@@ -8,10 +8,12 @@ import {
   setIsDeleteMode,
   setDeepSeekHistory,
   setSelectedModel,
+  setSelectedProvider, // 新增：导入设置选中提供商的action
   setShowSettingsModal,
   setDeepseekApiKey,
-  setOpenaiApiKey, // 新增
   setOpenrouterApiKey,
+  setAliyunEmbeddingApiKey, // 新增：导入设置阿里云嵌入API Key的action
+  setIntentAnalysisModel, // 新增：导入设置意图分析模型的action
   setAvailableModels,
   setCustomSystemPrompt, // 新增
   resetCustomSystemPrompt, // 新增
@@ -23,19 +25,29 @@ import {
   restoreMessages, // <--- 导入新的 action
   setCustomPromptForMode, // 新增：导入设置模式特定提示词的action
   resetCustomPromptForMode, // 新增：导入重置模式特定提示词的action
+  setModeFeatureSetting, // 新增：导入设置模式功能设置的action
+  resetModeFeatureSettings, // 新增：导入重置模式功能设置的action
+  setContextLimitSettings, // 新增：导入设置上下文限制设置的action
+  setAdditionalInfoForMode, // 新增：导入设置附加信息的action
+  setIsCreationModeEnabled, // 新增：导入设置创作模式启用状态的action
+  setShowCreationModal, // 新增：导入设置创作模式弹窗显示状态的action
+  setAdditionalInfoForAllModes, // 新增：导入批量设置附加信息的action
 } from '../store/slices/chatSlice';
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
 import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
 import useIpcRenderer from '../hooks/useIpcRenderer';
-import { restoreNovelArchive } from '../ipc/checkpointIpcHandler';
+import { restoreChatCheckpoint } from '../ipc/checkpointIpcHandler';
 import ChatHistoryPanel from './ChatHistoryPanel';
 import NotificationModal from './NotificationModal';
 import ConfirmationModal from './ConfirmationModal';
+import CreationModeModal from './CreationModeModal';
+import PromptManagerModal from './PromptManagerModal'; // 新增：导入提示词管理模态框
+import UnifiedSettingsModal from './UnifiedSettingsModal'; // 新增：导入统一设置模态框
+import KnowledgeBasePanel from './KnowledgeBasePanel'; // 新增：导入知识库面板
 import './ChatPanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil } from '@fortawesome/free-solid-svg-icons';
+import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil, faPlus, faWrench, faBook } from '@fortawesome/free-solid-svg-icons';
 import CustomProviderSettings from './CustomProviderSettings'; // 新增
-import PromptManagerModal from './PromptManagerModal'; // 新增：提示词管理模态框
 
 // 新增：可重用的工具调用渲染组件
 const ToolCallCard = ({ toolCall }) => {
@@ -104,15 +116,28 @@ const ChatPanel = memo(() => {
     deepSeekHistory,
     showSettingsModal,
     deepseekApiKey,
-    openaiApiKey,
     openrouterApiKey,
+    aliyunEmbeddingApiKey, // 新增：阿里云嵌入API Key
+    intentAnalysisModel, // 新增：意图分析模型
     selectedModel,
     availableModels,
     customSystemPrompt,
     enableStream,
     editingMessageId,
     customPrompts,
+    modeFeatureSettings, // 新增：模式特定的功能设置
+    contextLimitSettings,
+    additionalInfo,
+    isCreationModeEnabled,
+    showCreationModal,
   } = useSelector((state) => state.chat);
+  
+  // 使用 ref 来获取最新的状态值，避免闭包问题
+  const latestAliyunEmbeddingApiKey = useRef(aliyunEmbeddingApiKey);
+  latestAliyunEmbeddingApiKey.current = aliyunEmbeddingApiKey;
+  
+  // 使用 ref 来跟踪模型变化
+  const previousSelectedModelRef = useRef(selectedModel);
 
   // 从 novel slice 获取状态
   const { openTabs, activeTabId } = useSelector((state) => state.novel);
@@ -124,14 +149,46 @@ const ChatPanel = memo(() => {
   const [confirmationMessage, setConfirmationMessage] = useState('');
   const [onConfirmCallback, setOnConfirmCallback] = useState(null);
   const [onCancelCallback, setOnCancelCallback] = useState(null);
-  const [selectedProvider, setSelectedProvider] = useState('deepseek'); // 默认选择 DeepSeek
+  const [selectedProvider, setSelectedProvider] = useState(''); // 取消默认的DeepSeek选择
   const [notification, setNotification] = useState({ show: false, message: '' });
   const [editingText, setEditingText] = useState('');
   const [currentMode, setCurrentMode] = useState('general'); // 新增：当前创作模式
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false); // 新增：模式下拉菜单状态
   const [showPromptManager, setShowPromptManager] = useState(false); // 新增：提示词管理模态框状态
+  const [showKnowledgeBasePanel, setShowKnowledgeBasePanel] = useState(false); // 新增：知识库面板显示状态
 
-  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send, on, removeListener } = useIpcRenderer();
+  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send, on, removeListener, setAliyunEmbeddingApiKey: setAliyunEmbeddingApiKeyIpc, reinitializeModelProvider, reinitializeAliyunEmbedding } = useIpcRenderer();
+  
+  // 处理外部链接点击
+  const handleExternalLinkClick = useCallback(async (url, event) => {
+    event.preventDefault();
+    try {
+      // 使用 electron shell 打开外部链接
+      if (window.electron && window.electron.openExternal) {
+        await window.electron.openExternal(url);
+      } else {
+        // 备用方案：使用 IPC
+        await invoke('open-external', url);
+      }
+    } catch (error) {
+      console.error('打开外部链接失败:', error);
+      // 如果所有方法都失败，回退到默认行为
+      window.open(url, '_blank');
+    }
+  }, [invoke]);
+  
+  const handleToggleRagRetrieval = useCallback(async (mode, enabled) => {
+    try {
+      dispatch(setModeFeatureSetting({ mode, feature: 'ragRetrievalEnabled', enabled }));
+      await invoke('set-rag-retrieval-enabled', mode, enabled); // 传递 mode 参数
+      await setStoreValue('ragRetrievalEnabled', enabled); // 持久化全局状态
+      await setStoreValue('modeFeatureSettings', { ...modeFeatureSettings, [mode]: { ...modeFeatureSettings[mode], ragRetrievalEnabled: enabled } }); // 持久化模式状态
+      console.log(`[${mode}]模式RAG检索功能已${enabled ? '启用' : '禁用'}`);
+    } catch (error) {
+      console.error('切换RAG检索功能失败:', error);
+    }
+  }, [dispatch, invoke, setStoreValue, modeFeatureSettings]);
+
   // 将 loadSettings 定义为 useCallback，确保其稳定性
   const loadSettings = useCallback(async () => {
     try {
@@ -142,25 +199,54 @@ const ChatPanel = memo(() => {
         console.log(`加载到的 DeepSeek API Key: ${storedDeepseekApiKey}`);
       }
 
-      // 加载 OpenAI API Key
-      const storedOpenaiApiKey = await getStoreValue('openaiApiKey');
-      if (storedOpenaiApiKey) {
-        dispatch(setOpenaiApiKey(storedOpenaiApiKey));
-        console.log(`加载到的 OpenAI API Key: ${storedOpenaiApiKey}`);
-      }
       // 加载 OpenRouter API Key
       const storedOpenrouterApiKey = await getStoreValue('openrouterApiKey');
       if (storedOpenrouterApiKey) {
         dispatch(setOpenrouterApiKey(storedOpenrouterApiKey));
         console.log(`加载到的 OpenRouter API Key: ${storedOpenrouterApiKey}`);
       }
-      const storedModel = await getStoreValue('defaultAiModel');
+
+      // 加载阿里云嵌入API Key
+      const storedAliyunEmbeddingApiKey = await getStoreValue('aliyunEmbeddingApiKey');
+      console.log(`从store获取的阿里云嵌入API Key值:`, storedAliyunEmbeddingApiKey);
+      if (storedAliyunEmbeddingApiKey) {
+        dispatch(setAliyunEmbeddingApiKey(storedAliyunEmbeddingApiKey));
+        console.log(`加载到的阿里云嵌入API Key: ${storedAliyunEmbeddingApiKey}`);
+      } else {
+        console.log('阿里云嵌入API Key未设置或为空');
+      }
+
+      // 加载意图分析模型
+      const storedIntentAnalysisModel = await getStoreValue('intentAnalysisModel');
+      console.log(`从store获取的意图分析模型:`, storedIntentAnalysisModel);
+      if (storedIntentAnalysisModel) {
+        dispatch(setIntentAnalysisModel(storedIntentAnalysisModel));
+        console.log(`加载到的意图分析模型: ${storedIntentAnalysisModel}`);
+      } else {
+        console.log('意图分析模型未设置，将使用默认模型');
+      }
+
+      // 加载选中的提供商 - 新增：确保selectedProvider与存储同步
+      const storedProvider = await getStoreValue('selectedProvider');
+      console.log(`[值传递流程] 从存储获取 selectedProvider: ${storedProvider}`);
+      if (storedProvider) {
+        dispatch(setSelectedProvider(storedProvider));
+        console.log(`[值传递流程] 分发 setSelectedProvider action: ${storedProvider}`);
+        console.log(`加载到的提供商: ${storedProvider}`);
+      } else {
+        console.log('未加载到提供商设置');
+      }
+      
+      const storedModel = await getStoreValue('selectedModel');
+      console.log(`[值传递流程-1] 从存储获取 selectedModel: ${storedModel}`);
       if (storedModel) {
         dispatch(setSelectedModel(storedModel));
+        console.log(`[值传递流程-2] 分发 setSelectedModel action: ${storedModel}`);
         console.log(`加载到的模型: ${storedModel}`);
       } else {
-        dispatch(setSelectedModel('deepseek-chat')); // 默认模型
-        console.log('未加载到模型，使用默认模型: deepseek-chat');
+        dispatch(setSelectedModel('')); // 取消默认模型
+        console.log('[值传递流程-2] 分发 setSelectedModel action: (空值)');
+        console.log('未加载到模型，不设置默认模型');
       }
 
       // 加载当前模式设置
@@ -196,15 +282,26 @@ const ChatPanel = memo(() => {
           console.log('可用模型列表已加载:', modelsResult.models.map(m => m.id));
 
           // 确保 selectedProvider 与当前选中的模型匹配
-          const currentSelectedModel = storedModel || 'deepseek-chat';
+          // 使用 storedModel 而不是 selectedModel，因为 Redux 状态更新是异步的
+          const currentSelectedModel = storedModel || selectedModel || '';
           const matchedModel = modelsResult.models.find(m => m.id === currentSelectedModel);
+          
+          // 重新同步 selectedModel 为存储值，确保 Redux 状态与存储一致
+          console.log(`[同步调试] 存储值=${storedModel}, Redux状态=${selectedModel}, 是否不一致=${storedModel && selectedModel !== storedModel}`);
+          if (storedModel && selectedModel !== storedModel) {
+              dispatch(setSelectedModel(storedModel));
+              console.log(`重新同步 selectedModel 为存储值: ${storedModel}`);
+          } else {
+              console.log(`[同步调试] 状态一致，无需同步: 存储=${storedModel}, Redux=${selectedModel}`);
+          }
           if (matchedModel) {
               setSelectedProvider(matchedModel.provider);
               console.log(`loadSettings: 根据选中模型 '${currentSelectedModel}'，设置 selectedProvider 为 '${matchedModel.provider}'`);
-          } else {
-              // 如果当前选中模型不在可用列表中，则重置为默认提供商
-              setSelectedProvider('deepseek');
-              console.warn(`loadSettings: 选中模型 '${currentSelectedModel}' 不在可用模型列表中，重置 selectedProvider 为 'deepseek'`);
+          } else if (currentSelectedModel) {
+              // 如果当前选中模型不在可用列表中，则清空选择
+              setSelectedProvider('');
+              dispatch(setSelectedModel(''));
+              console.warn(`loadSettings: 选中模型 '${currentSelectedModel}' 不在可用模型列表中，清空选择`);
           }
       } else {
           console.error('loadSettings: 获取可用模型列表失败:', modelsResult.error);
@@ -217,12 +314,56 @@ const ChatPanel = memo(() => {
       send('set-streaming-mode', { stream: streamEnabled }); // **新增**: 将设置同步到后端
       console.log(`加载到的流式传输设置: ${streamEnabled}，并已同步到后端。`);
 
+      // 加载功能启用状态（模式特定）- 只加载RAG检索功能
+      const storedModeFeatureSettings = await getStoreValue('modeFeatureSettings');
+      console.log('[DEBUG] 从存储获取的 modeFeatureSettings:', JSON.stringify(storedModeFeatureSettings, null, 2));
+      
+      if (storedModeFeatureSettings) {
+        // 更新Redux state中的每个模式功能设置（只处理RAG检索）
+        Object.entries(storedModeFeatureSettings).forEach(([mode, settings]) => {
+          console.log(`[DEBUG] 处理模式 ${mode} 的功能设置:`, settings);
+          if (settings.ragRetrievalEnabled !== undefined) {
+            console.log(`[DEBUG] 分发模式 ${mode} 的 ragRetrievalEnabled: ${settings.ragRetrievalEnabled}`);
+            dispatch(setModeFeatureSetting({ mode, feature: 'ragRetrievalEnabled', enabled: settings.ragRetrievalEnabled }));
+          }
+        });
+        console.log('加载到的模式功能设置:', storedModeFeatureSettings);
+      } else {
+        console.log('未加载到模式功能设置，使用默认值');
+      }
+
+      // 加载上下文限制设置
+      try {
+        const contextSettingsResult = await invoke('get-context-limit-settings');
+        if (contextSettingsResult.success) {
+          dispatch(setContextLimitSettings(contextSettingsResult.settings));
+          console.log('加载到的上下文限制设置:', contextSettingsResult.settings);
+        } else {
+          console.error('加载上下文限制设置失败:', contextSettingsResult.error);
+        }
+      } catch (error) {
+        console.error('调用上下文限制设置API失败:', error);
+      }
+
+      // 加载附加信息
+      const storedAdditionalInfo = await getStoreValue('additionalInfo');
+      console.log('从存储加载的 additionalInfo:', storedAdditionalInfo);
+      if (storedAdditionalInfo) {
+        // 更新Redux state中的每个模式附加信息
+        Object.entries(storedAdditionalInfo).forEach(([mode, info]) => {
+          dispatch(setAdditionalInfoForMode({ mode, info }));
+        });
+        console.log('加载到的附加信息:', storedAdditionalInfo);
+      } else {
+        console.log('未加载到附加信息，使用初始状态。');
+      }
+
       console.log('loadSettings: 结束加载设置。');
 
     } catch (error) {
       console.error('加载设置失败:', error);
     }
-  }, [dispatch, getStoreValue, setDeepseekApiKey, setOpenaiApiKey, setOpenrouterApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider, setCustomSystemPrompt]); // 更新依赖
+  }, [dispatch, getStoreValue, setDeepseekApiKey, setOpenrouterApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider]); // 更新依赖
 
   const handleUserQuestionResponse = useCallback(async (response, toolCallId, isButtonClick) => {
     dispatch(setQuestionCard(null));
@@ -299,18 +440,28 @@ const ChatPanel = memo(() => {
       console.log(`[ChatPanel] 发送消息，模式: ${currentMode}, 自定义提示词: ${hasCustomPrompt ? '有' : '无'}`);
       console.log(`[ChatPanel] 自定义提示词详情: 类型=${typeof customPrompt}, 值="${customPrompt}"`);
       console.log(`[ChatPanel] 从存储读取的完整提示词:`, storedCustomPrompts);
+      console.log(`[值传递流程-4] 组件获取 selectedModel: ${selectedModel}`);
+      console.log(`[ChatPanel] 当前选中模型: ${selectedModel}, 将传递给后端`);
+      // 获取当前模式的功能设置（工具功能已硬编码，只传递RAG检索状态）
+      const currentModeFeatures = modeFeatureSettings[currentMode] || {
+        ragRetrievalEnabled: false
+      };
+
       await invoke('process-command', {
         message: messageText,
         sessionId: currentSessionId,
         currentMessages: messages,
         mode: currentMode,
-        customPrompt: customPrompt // 添加自定义提示词参数
+        customPrompt: customPrompt, // 添加自定义提示词参数
+        ragRetrievalEnabled: currentModeFeatures.ragRetrievalEnabled, // 添加模式特定的RAG检索状态
+        model: selectedModel // 新增：传递当前选中的模型
       });
+      console.log(`[值传递流程-5] 已调用 invoke('process-command')，模型参数: ${selectedModel}`);
     } catch (error) {
       console.error('Error sending message to AI:', error);
       dispatch(appendMessage({ sender: 'System', text: `发送消息失败: ${error.message}`, role: 'system', content: `发送消息失败: ${error.message}`, className: 'system-error' }));
     }
-  }, [dispatch, invoke, messages, questionCard, handleUserQuestionResponse, enableStream, currentMode]);
+  }, [dispatch, invoke, messages, questionCard, handleUserQuestionResponse, enableStream, currentMode, modeFeatureSettings]);
 
   // New handler for approving/rejecting all pending tool calls
   const handleToolApproval = useCallback(async (action) => {
@@ -345,51 +496,26 @@ const ChatPanel = memo(() => {
     }
   }, [dispatch, invoke, pendingToolCalls, toolCallState, activeTabId]);
 
-  const handleProviderChange = useCallback((event) => {
-    const newProvider = event.target.value;
-    setSelectedProvider(newProvider);
-    // 当提供商改变时，重置 selectedModel 为该提供商的第一个模型（如果存在）
-    const firstModelOfNewProvider = availableModels.find(model => model.provider === newProvider);
-    if (firstModelOfNewProvider) {
-      dispatch(setSelectedModel(firstModelOfNewProvider.id));
-    } else {
-      dispatch(setSelectedModel('')); // 如果没有找到模型，则清空
-    }
-  }, [dispatch, availableModels]);
+  // 设置相关函数已移至 ApiSettingsTab 和 GeneralSettingsTab 组件
 
-  const handleModelChange = useCallback((event) => {
-    const newModel = event.target.value;
-    console.log(`用户选择的模型: ${newModel}`);
-    dispatch(setSelectedModel(newModel));
-  }, [dispatch]);
+ // 新增：处理模式切换回调
+ const handleModeSwitch = useCallback((mode) => {
+   setCurrentMode(mode);
+   setStoreValue('currentMode', mode);
+ }, [setStoreValue]);
 
-  const handleSaveSettings = useCallback(async () => { // 将 handleSaveSettings 封装为 useCallback
-    try {
-      console.log(`准备保存 DeepSeek API Key: ${deepseekApiKey}`);
-      await setStoreValue('deepseekApiKey', deepseekApiKey);
-      console.log(`准备保存 OpenAI API Key: ${openaiApiKey}`);
-      await setStoreValue('openaiApiKey', openaiApiKey); // 保存 OpenAI API Key
-      console.log(`准备保存 OpenRouter API Key: ${openrouterApiKey}`);
-      await setStoreValue('openrouterApiKey', openrouterApiKey);
-      console.log(`准备保存模型: ${selectedModel}`);
-      await setStoreValue('defaultAiModel', selectedModel);
-      console.log(`准备保存自定义系统提示词: ${customSystemPrompt.substring(0, 50)}...`);
-      await setStoreValue('customSystemPrompt', customSystemPrompt); // 保存自定义提示词
-      console.log(`准备保存当前模式: ${currentMode}`);
-      await setStoreValue('currentMode', currentMode); // 保存当前模式
-      await setStoreValue('enableStream', enableStream); // 保存流式传输设置
-      send('set-streaming-mode', { stream: enableStream }); // **新增**: 保存时也同步到后端
-      dispatch(setShowSettingsModal(false));
-      console.log('设置已保存！');
-    } catch (error) {
-      console.error('保存设置失败:', error);
-    }
- }, [deepseekApiKey, openaiApiKey, openrouterApiKey, selectedModel, customSystemPrompt, enableStream, setStoreValue, dispatch]); // 依赖中添加 enableStream
+ // 新增：处理重新生成正文
+ const handleRegenerateWriting = useCallback(async () => {
+   // 这里需要实现重新生成正文的逻辑
+   // 可能需要发送特定的消息给AI来重新生成
+   console.log('重新生成正文');
+ }, []);
 
- const handleCancelSettings = useCallback(() => { // 简化 handleCancelSettings
-    dispatch(setShowSettingsModal(false));
-    loadSettings(); // 重新加载以恢复未保存的更改
-  }, [dispatch, loadSettings]); // 依赖中添加 dispatch, loadSettings
+ // 新增：处理进入调整模式
+ const handleEnterAdjustmentMode = useCallback(() => {
+   setCurrentMode('adjustment');
+   setStoreValue('currentMode', 'adjustment');
+ }, [setStoreValue]);
 
 
 
@@ -451,6 +577,9 @@ const ChatPanel = memo(() => {
     loadSettings();
   }, [loadSettings]); // loadSettings 已经是 useCallback，依赖稳定
 
+  // 移除不必要的 selectedModel 变化监听，避免无限循环
+  // 状态同步已经在 loadSettings 中处理，不需要额外监听
+
   // 新增：处理 show-diff-preview 事件的专用 effect
   useEffect(() => {
     const handleShowDiffPreview = (event, data) => {
@@ -478,6 +607,11 @@ const ChatPanel = memo(() => {
             console.warn(`[ChatPanel] 兼容性匹配失败：未找到与路径 '${filePath}' (clean: '${cleanIncomingPath}') 匹配的活动标签页。`);
         }
     };
+
+    // 增加最大监听器限制以避免内存泄漏警告
+    if (window.ipcRenderer && window.ipcRenderer.setMaxListeners) {
+      window.ipcRenderer.setMaxListeners(20);
+    }
 
     on('show-diff-preview', handleShowDiffPreview);
 
@@ -512,6 +646,7 @@ const ChatPanel = memo(() => {
 
   return (
     <React.Fragment>
+      
       <div className="chat-panel-content">
         <div className="chat-header-actions">
           {/* 新增的设置按钮，移到最左边 */}
@@ -530,6 +665,10 @@ const ChatPanel = memo(() => {
           }} title="清理历史记录">
             <FontAwesomeIcon icon={faTrashCan} />
           </button>
+          {/* 新增的知识库按钮 */}
+          <button className="knowledgebase-button" onClick={() => setShowKnowledgeBasePanel(!showKnowledgeBasePanel)} title="知识库管理">
+            <FontAwesomeIcon icon={faBook} />
+          </button>
         </div>
 
         <button className="reset-chat-button" onClick={handleResetChat}>×</button>
@@ -545,7 +684,7 @@ const ChatPanel = memo(() => {
                       setOnConfirmCallback(() => async () => {
                         const taskId = msg.sessionId || currentSessionIdRef.current || 'default-task';
                         console.log(`Restoring checkpoint ${msg.checkpointId} for task ${taskId}...`);
-                        const result = await restoreNovelArchive(taskId, msg.checkpointId);
+                        const result = await restoreChatCheckpoint(taskId, msg.checkpointId);
                         if (result.success) {
                           // **关键修复**: 调用新的 restoreMessages action 来重构历史状态
                           if (result.messages) {
@@ -600,8 +739,19 @@ const ChatPanel = memo(() => {
                   <div className="message-content">
                       {/* 如果没有工具调用，则在文本流式传输时显示加载图标 */}
                       {msg.isLoading && (!msg.toolCalls || msg.toolCalls.length === 0) && <FontAwesomeIcon icon={faSpinner} spin className="ai-typing-spinner" />}
-                      <span>{msg.content || msg.text}</span>
+                      {/* 只显示纯文字内容，不显示工具调用的JSON信息 */}
+                      <span>{msg.toolCalls && msg.toolCalls.length > 0 ?
+                        (msg.content || msg.text || '').replace(/--- 工具调用请求 ---.*$/s, '').trim() :
+                        msg.content || msg.text}</span>
                   </div>
+
+                  {/* 正文生成后的选项按钮 */}
+                  {msg.role === 'assistant' && currentMode === 'writing' && !msg.isLoading && !msg.toolCalls && (
+                    <div className="writing-options">
+                      {/* <button onClick={handleRegenerateWriting}>重新生成正文</button> */}
+                      <button onClick={handleEnterAdjustmentMode}>进入调整模式</button>
+                    </div>
+                  )}
                   
                   <div className="message-actions">
                     <button title="复制" onClick={() => {
@@ -692,6 +842,11 @@ const ChatPanel = memo(() => {
           />
         )}
 
+        {/* 知识库面板 */}
+        {showKnowledgeBasePanel && (
+          <KnowledgeBasePanel onClose={() => setShowKnowledgeBasePanel(false)} />
+        )}
+
         {/* New Tool Action Bar, displayed above the input group */}
         {toolCallState === 'pending_user_action' && (
             <div className="tool-action-bar">
@@ -735,6 +890,7 @@ const ChatPanel = memo(() => {
           </div>
         )}
         <div className="chat-input-group">
+
           <div className="mode-selector-dropdown">
             <button
               className="mode-dropdown-toggle"
@@ -762,10 +918,6 @@ const ChatPanel = memo(() => {
                   onClick={() => { console.log('切换到调整模式'); setCurrentMode('adjustment'); setStoreValue('currentMode', 'adjustment'); setIsModeDropdownOpen(false); }}
                 >调整</button>
                 <div className="dropdown-divider"></div>
-                <button
-                  className="prompt-manager-button"
-                  onClick={() => { setShowPromptManager(true); setIsModeDropdownOpen(false); }}
-                >提示词管理</button>
               </div>
             )}
           </div>
@@ -789,112 +941,11 @@ const ChatPanel = memo(() => {
         </div>
       </div>
 
-      {/* 设置模态框 */}
-      {showSettingsModal && (
-        <div className="settings-modal-overlay">
-          <div className="settings-modal-content">
-           <h2>模型设置</h2>
-           <div className="setting-item">
-             <label htmlFor="providerSelect">选择提供商:</label>
-             <select
-               id="providerSelect"
-               value={selectedProvider}
-               onChange={handleProviderChange}
-             >
-               {/* 从 availableModels 动态生成提供商列表 */}
-               {[...new Set(availableModels.map(model => model.provider))].map(provider => (
-                 <option key={provider} value={provider}>
-                   {/* 将首字母大写以获得更好的显示效果 */}
-                   {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                 </option>
-               ))}
-             </select>
-           </div>
-
-           {/* 根据 selectedProvider 显示不同的 API Key 输入框 */}
-           {selectedProvider === 'deepseek' && (
-             <div className="setting-item">
-               <label htmlFor="deepseekApiKey">DeepSeek API Key:</label>
-               <input
-                 type="text"
-                 id="deepseekApiKey"
-                 value={deepseekApiKey}
-                 onChange={(e) => dispatch(setDeepseekApiKey(e.target.value))}
-                 placeholder="请输入您的 DeepSeek API Key"
-               />
-             </div>
-           )}
-           {selectedProvider === 'openai' && (
-             <div className="setting-item">
-               <label htmlFor="openaiApiKey">OpenAI API Key:</label>
-               <input
-                 type="text"
-                 id="openaiApiKey"
-                 value={openaiApiKey}
-                 onChange={(e) => dispatch(setOpenaiApiKey(e.target.value))}
-                 placeholder="请输入您的 OpenAI API Key"
-               />
-             </div>
-           )}
-           {selectedProvider === 'openrouter' && (
-             <div className="setting-item">
-               <label htmlFor="openrouterApiKey">OpenRouter API Key:</label>
-               <input
-                 type="text"
-                 id="openrouterApiKey"
-                 value={openrouterApiKey}
-                 onChange={(e) => dispatch(setOpenrouterApiKey(e.target.value))}
-                 placeholder="请输入您的 OpenRouter API Key"
-               />
-             </div>
-           )}
-
-           <div className="setting-item">
-             <label htmlFor="modelSelect">选择模型:</label>
-             <select
-               id="modelSelect"
-               value={selectedModel}
-               onChange={handleModelChange}
-             >
-               {availableModels
-                 .filter(model => model.provider === selectedProvider) // 根据提供商过滤模型
-                 .map((model) => (
-                   <option key={model.id} value={model.id}>
-                     {model.id}
-                   </option>
-                 ))}
-             </select>
-           </div>
-
-           {/* 自定义系统提示词部分已移至专门的提示词管理模态框 */}
-
-           {/*
-            // 流式传输开关
-           <div className="setting-item">
-             <label htmlFor="streamToggle">启用流式传输:</label>
-             <label className="switch">
-               <input
-                 type="checkbox"
-                 id="streamToggle"
-                 checked={enableStream}
-                 onChange={(e) => dispatch(setEnableStream(e.target.checked))}
-               />
-               <span className="slider round"></span>
-             </label>
-           </div>
-           */}
-
-           <div className="modal-actions">
-             <button onClick={handleSaveSettings} className="save-button">保存</button>
-             <button onClick={handleCancelSettings} className="cancel-button">取消</button>
-           </div>
-           
-           {/* 新增：自定义提供商设置组件 */}
-           <CustomProviderSettings />
-
-         </div>
-       </div>
-     )}
+      {/* 统一设置模态框 */}
+      <UnifiedSettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => dispatch(setShowSettingsModal(false))}
+      />
 
       {showConfirmationModal && (
         <ConfirmationModal
@@ -908,6 +959,16 @@ const ChatPanel = memo(() => {
         <NotificationModal
           message={notification.message}
           onClose={() => setNotification({ show: false, message: '' })}
+        />
+      )}
+
+      {/* 创作模式配置弹窗 */}
+      {showCreationModal && (
+        <CreationModeModal
+          isOpen={showCreationModal}
+          onClose={() => dispatch(setShowCreationModal(false))}
+          onModeSwitch={handleModeSwitch}
+          onOpenMemorySettings={() => setShowPromptManager(true)}
         />
       )}
 

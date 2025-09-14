@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { createNovelFile, updateNovelTitle, updateTabContent, startDiff, endDiff } from '../store/slices/novelSlice';
+import { updateNovelTitle, updateTabContent, startDiff, endDiff } from '../store/slices/novelSlice';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import HardBreak from '@tiptap/extension-hard-break';
@@ -12,6 +12,7 @@ import { faPlus, faSave, faExchangeAlt } from '@fortawesome/free-solid-svg-icons
 
 import './EditorPanel.css';
 import NotificationModal from './NotificationModal';
+import backgroundImage from '../assets/背景.png'; // 导入背景图片
  
 import useIpcRenderer from '../hooks/useIpcRenderer';
 import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tiptap-helpers.js';
@@ -144,35 +145,6 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
     saveContent(true); // 传入 true 表示手动保存
   }, [saveContent]);
 
-  const handleCreateNewFile = useCallback(async () => {
-    // 获取 novel 文件夹下的文件列表
-    const result = await invoke('list-novel-files');
-    const files = result.success ? result.files : []; // 确保 files 是一个数组
-    
-    console.log('现有文件列表 (files):', files); // 添加日志
-
-    let newFileName = '未命名1.txt';
-    let i = 1;
-    // 查找可用的未命名文件名
-    while (files.includes(newFileName)) { // 移除 'novel/' 前缀
-      console.log(`文件存在: ${newFileName}, 尝试下一个...`); // 添加日志
-      i++;
-      newFileName = `未命名${i}.txt`;
-    }
-    console.log('最终确定的新文件名:', newFileName); // 添加日志
-
-    const newFilePath = `novel/${newFileName}`;
-    try {
-      // 调用 Redux action 创建文件
-      await dispatch(createNovelFile({ filePath: newFilePath })).unwrap();
-      setModalMessage(`文件 "${newFileName}" 创建成功！`);
-      setShowModal(true);
-    } catch (error) {
-      console.error('创建新文件失败:', error);
-      setModalMessage(`创建新文件失败: ${error.message}`);
-      setShowModal(true);
-    }
-  }, [dispatch, invoke]);
 
   const handleCloseTab = useCallback(() => {
     setModalMessage('功能待开发');
@@ -385,47 +357,63 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
   return (
     <>
       {!activeTab ? (
-        <div className="no-file-selected-panel">
-          <button
-            className="action-button create-file-button"
-            onClick={handleCreateNewFile}
-          >
-            创建新文件
-          </button>
+        <div
+          className="no-file-selected-panel"
+          style={{
+            backgroundImage: `url(${backgroundImage})`,
+            backgroundSize: '20% auto',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat'
+          }}
+        >
         </div>
       ) : (
         <div className="editor-panel-content">
           <div className="title-bar">
-            <input
-              type="text"
-              ref={titleInputRef}
-              className="novel-title-input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onFocus={() => {
-                if (title === '未命名') {
-                  setTitle('');
-                }
-              }}
-              onBlur={handleTitleSave}
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  await handleTitleSave();
-                  if (TiptapEditorInstance.current) {
-                    TiptapEditorInstance.current.commands.focus('start');
-                  }
-                }
-              }}
-            />
-            <button className="save-button" onClick={() => saveContent(true)}>
-              <FontAwesomeIcon icon={faSave} />
-            </button>
-            {/* 临时的 Diff 触发按钮 */}
-            {activeTab.isDirty && <span className="unsaved-indicator">*</span>}
+            {activeTab.isDeleted ? (
+              <div className="deleted-file-indicator">
+                <span className="deleted-icon">🗑️</span>
+                <span className="deleted-text">{title} (已删除)</span>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  ref={titleInputRef}
+                  className="novel-title-input"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onFocus={() => {
+                    if (title === '未命名') {
+                      setTitle('');
+                    }
+                  }}
+                  onBlur={handleTitleSave}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      await handleTitleSave();
+                      if (TiptapEditorInstance.current) {
+                        TiptapEditorInstance.current.commands.focus('start');
+                      }
+                    }
+                  }}
+                />
+                <button className="save-button" onClick={() => saveContent(true)}>
+                  <FontAwesomeIcon icon={faSave} />
+                </button>
+                {/* 临时的 Diff 触发按钮 */}
+                {activeTab.isDirty && <span className="unsaved-indicator">*</span>}
+              </>
+            )}
           </div>
 
-          {activeTab.viewMode === 'diff' ? (
+          {activeTab.isDeleted ? (
+            <div className="deleted-file-message">
+              <p>此文件已被删除，无法编辑。</p>
+              <p>请关闭此标签页或切换到其他文件。</p>
+            </div>
+          ) : activeTab.viewMode === 'diff' ? (
             <div className="diff-view-wrapper">
               <DiffViewer
                 originalContent={activeTab.content}

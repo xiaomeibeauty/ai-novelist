@@ -10,19 +10,20 @@ import ContextMenu from './ContextMenu'; // 引入 ContextMenu 组件
 import NotificationModal from './NotificationModal'; // 新增
 import ConfirmationModal from './ConfirmationModal'; // 新增
 import CheckpointPanel from './CheckpointPanel'; // 引入版本历史面板
+import PromptManagerModal from './PromptManagerModal'; // 新增：提示词管理模态框
 import { faHistory } from '@fortawesome/free-solid-svg-icons'; // 引入历史图标
 
 function ChapterTreePanel() {
   const chapters = useSelector((state) => state.novel.chapters);
   const refreshCounter = useSelector((state) => state.novel.refreshCounter); // 监听 refreshCounter
-  const [currentView, setCurrentView] = useState('chapters'); // 'chapters' or 'checkpoints'
+  const [currentView, setCurrentView] = useState('chapters'); // 'chapters' or 'checkpoints' or 'knowledgebase'
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [currentRenameItemId, setCurrentRenameItemId] = useState(null);
   const [currentRenameItemTitle, setCurrentRenameItemTitle] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [collapsedChapters, setCollapsedChapters] = useState({});
-  const { invoke, on, removeListener } = useIpcRenderer();
+  const { invoke, on, removeListener, reinitializeModelProvider } = useIpcRenderer();
   const dispatch = useDispatch();
   const [showNotificationModal, setShowNotificationModal] = useState(false); // 新增
   const [notificationMessage, setNotificationMessage] = useState(''); // 新增
@@ -30,6 +31,7 @@ function ChapterTreePanel() {
   const [confirmationMessage, setConfirmationMessage] = useState(''); // 新增
   const [onConfirmCallback, setOnConfirmCallback] = useState(null); // 新增
   const [onCancelCallback, setOnCancelCallback] = useState(null); // 新增
+  const [showPromptManager, setShowPromptManager] = useState(false); // 新增：提示词管理模态框状态
 
   // 新增状态用于控制右键菜单
   const [contextMenu, setContextMenu] = useState({
@@ -178,15 +180,27 @@ function ChapterTreePanel() {
 
   // 设置面板相关函数
   const handleToggleSettings = useCallback(() => {
-    // setShowSettings(prev => !prev); // 移除旧的显示/隐藏逻辑
-    setNotificationMessage('功能待开发'); // 设置通知消息
-    setShowNotificationModal(true); // 显示通知模态框
-  }, []);
+    setNotificationMessage('此功能已整合到统一设置系统中，请使用聊天栏的设置按钮');
+    setShowNotificationModal(true);
+  }, [setNotificationMessage, setShowNotificationModal]);
 
   const handleSaveApiKey = useCallback(async () => {
     try {
       await invoke('set-store-value', 'deepseekApiKey', apiKey);
-      setNotificationMessage('API Key 已保存！');
+      
+      // 重新初始化模型提供者
+      try {
+        const result = await reinitializeModelProvider();
+        if (result.success) {
+          setNotificationMessage('API Key 已保存！模型提供者已重新初始化。');
+        } else {
+          setNotificationMessage('API Key 已保存，但重新初始化模型提供者失败。');
+        }
+      } catch (error) {
+        console.error('重新初始化模型提供者失败:', error);
+        setNotificationMessage('API Key 已保存，但重新初始化模型提供者失败。');
+      }
+      
       setShowNotificationModal(true);
       setShowSettings(false);
     } catch (error) {
@@ -194,7 +208,7 @@ function ChapterTreePanel() {
       setNotificationMessage('保存 API Key 失败！');
       setShowNotificationModal(true);
     }
-  }, [invoke, apiKey]);
+  }, [invoke, apiKey, reinitializeModelProvider]);
 
   const handleCancelSettings = useCallback(() => {
     setShowSettings(false);
@@ -241,8 +255,13 @@ function ChapterTreePanel() {
     try {
       const result = await invoke(action, ...args);
       if (result.success) {
-        setNotificationMessage(result.message);
-        setShowNotificationModal(true);
+        // 过滤掉"结束加载设置"消息，避免不必要的通知
+        if (result.message && result.message.includes('结束加载设置')) {
+          console.log('过滤掉通知消息:', result.message);
+        } else {
+          setNotificationMessage(result.message);
+          setShowNotificationModal(true);
+        }
         fetchChapters(); // 刷新章节列表
       } else {
         setNotificationMessage(`操作失败: ${result.error}`);
@@ -555,7 +574,9 @@ function ChapterTreePanel() {
       </div>
 
       <div className="main-chapter-area">
-        {currentView === 'chapters' ? (
+        {currentView === 'checkpoints' ? (
+          <CheckpointPanel onClose={() => setCurrentView('chapters')} />
+        ) : (
           <div className="chapter-tree-panel-content" onContextMenu={(e) => handleContextMenu(e, null, false, null, '')}>
             {chapters.length === 0 ? (
               <p className="no-chapters-message">暂无文件</p>
@@ -563,8 +584,6 @@ function ChapterTreePanel() {
               renderChapterTree(chapters)
             )}
           </div>
-        ) : (
-          <CheckpointPanel onClose={() => setCurrentView('chapters')} />
         )}
       </div>
 
@@ -646,6 +665,14 @@ function ChapterTreePanel() {
           message={confirmationMessage}
           onConfirm={onConfirmCallback}
           onCancel={onCancelCallback}
+        />
+      )}
+
+      {/* 提示词管理模态框 */}
+      {showPromptManager && (
+        <PromptManagerModal
+          isOpen={showPromptManager}
+          onClose={() => setShowPromptManager(false)}
         />
       )}
     </div>

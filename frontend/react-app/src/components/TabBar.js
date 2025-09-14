@@ -25,11 +25,12 @@ function TabBar() {
       {openTabs.map((tab) => (
         <div
           key={tab.id}
-          className={`tab-item ${tab.id === activeTabId ? 'active' : ''}`}
+          className={`tab-item ${tab.id === activeTabId ? 'active' : ''} ${tab.isDeleted ? 'deleted' : ''}`}
           onClick={() => handleTabClick(tab.id)}
         >
           <span className="tab-title">{tab.title}</span>
           {tab.isDirty && <span className="dirty-indicator">*</span>}
+          {tab.isDeleted && <span className="deleted-indicator">🗑️</span>}
           <button
             className="close-tab-button"
             onClick={(e) => handleCloseTab(e, tab.id)}

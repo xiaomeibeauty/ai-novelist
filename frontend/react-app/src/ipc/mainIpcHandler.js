@@ -59,10 +59,20 @@ export const registerMainIpcListeners = (dispatch) => {
     dispatch({ type: 'novel/fileWritten', payload: { filePath, content } });
   };
 
+  const handleFileDeleted = (event, { filePath }) => {
+    dispatch({ type: 'novel/fileDeleted', payload: { filePath } });
+  };
+
+  const handleFileRenamed = (event, { oldFilePath, newFilePath }) => {
+    dispatch({ type: 'novel/fileRenamed', payload: { oldFilePath, newFilePath } });
+  };
+
   if (window.ipcRenderer) {
     window.ipcRenderer.on('ai-response', handleAiResponse);
     window.ipcRenderer.on('update-current-file', handleUpdateCurrentFile);
     window.ipcRenderer.on('file-written', handleFileWritten);
+    window.ipcRenderer.on('file-deleted', handleFileDeleted);
+    window.ipcRenderer.on('file-renamed', handleFileRenamed);
     window.ipcRenderer.on('ai-chat-history', (event, history) => {
       dispatch(setDeepSeekHistory(history));
     });
@@ -75,6 +85,8 @@ export const registerMainIpcListeners = (dispatch) => {
       window.ipcRenderer.removeListener('ai-response', handleAiResponse);
       window.ipcRenderer.removeListener('update-current-file', handleUpdateCurrentFile);
       window.ipcRenderer.removeListener('file-written', handleFileWritten);
+      window.ipcRenderer.removeListener('file-deleted', handleFileDeleted);
+      window.ipcRenderer.removeListener('file-renamed', handleFileRenamed);
       // 注意：这里移除监听器时，回调函数必须是同一个引用，否则无法正确移除。
       // 对于匿名函数，需要单独定义
       const removeHistoryListener = (event, history) => {

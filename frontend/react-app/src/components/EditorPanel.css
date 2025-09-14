@@ -155,15 +155,18 @@
 
 /* 操作按钮通用样式 */
 .action-button {
-    background-color: #3a3f4b; /* 与刷新按钮背景色一致 */
-    color: #abb2bf; /* 与刷新按钮文字颜色一致 */
-    border: 1px solid #5c6370; /* 与刷新按钮边框一致 */
-    padding: 10px 20px; /* 适当的内边距 */
-    border-radius: 4px; /* 圆角 */
+    background-color: rgba(255, 255, 255, 0.9); /* 半透明白色背景 */
+    color: #2c3e50; /* 深色文字 */
+    border: 2px solid var(--primary-color); /* 主色调边框 */
+    padding: 12px 24px; /* 适当的内边距 */
+    border-radius: 8px; /* 圆角 */
     cursor: pointer;
     font-size: 1.2em; /* 字体大小 */
-    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    font-weight: bold; /* 加粗字体 */
+    transition: all 0.3s ease;
     margin-bottom: 10px; /* 按钮之间间距 */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* 阴影效果 */
+    backdrop-filter: blur(5px); /* 毛玻璃效果 */
 }
 
 .action-button:last-child {
@@ -171,9 +174,10 @@
 }
 
 .action-button:hover {
-    background-color: #4a4f5b; /* 悬停背景色 */
-    border-color: var(--primary-color); /* 悬停时边框变为绿色 */
-    color: var(--primary-color); /* 悬停时文字变为绿色 */
+    background-color: var(--primary-color); /* 悬停时背景变为主色调 */
+    color: white; /* 悬停时文字变为白色 */
+    transform: translateY(-2px); /* 轻微上浮效果 */
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3); /* 增强阴影 */
 }
 
 /* 为 DiffViewer 添加一个包装器样式，以确保其正确填充空间 */
@@ -181,4 +185,46 @@
   display: flex; /* 确保子元素可以正确应用 flex 属性 */
   flex-grow: 1;  /* 占据父容器的剩余空间 */
   overflow: hidden; /* 防止自身溢出，让内部的 DiffViewer 处理滚动 */
+}
+
+/* 已删除文件指示器样式 */
+.deleted-file-indicator {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 1.5em;
+  font-weight: bold;
+  color: #ff6b6b;
+  background-color: #3a1f1f;
+  border: 1px solid #ff6b6b;
+  border-radius: var(--border-radius-small);
+  margin-right: 10px;
+}
+
+.deleted-icon {
+  margin-right: 8px;
+  font-size: 1.2em;
+}
+
+.deleted-text {
+  text-decoration: line-through;
+}
+
+/* 已删除文件消息样式 */
+.deleted-file-message {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: #2d2d2d;
+  color: #ff6b6b;
+  font-size: 1.2em;
+  text-align: center;
+  padding: 20px;
+  border-radius: var(--border-radius-medium);
+}
+
+.deleted-file-message p {
+  margin: 10px 0;
 }

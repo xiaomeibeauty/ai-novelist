@@ -11,6 +11,7 @@
     "start": "npm run build:backend && electron .",
     "start:react": "cd frontend/react-app && npm start",
     "start:full": "concurrently \"npm run start:react\" \"wait-on http://localhost:3000 && npm run start\"",
+    "start:prod": "npm run build:backend && npm run build:react && electron . --no-dev-tools",
     "build:backend": "tsc -p tsconfig.backend.json",
     "build:react": "npm run build --workspace=frontend/react-app",
     "clean:novel-data": "node -e \"require('fs').rmSync('novel', { recursive: true, force: true }); require('fs').mkdirSync('novel', { recursive: true });\"",
@@ -23,24 +24,33 @@
   "author": "Roo",
   "license": "ISC",
   "dependencies": {
+    "@chroma-core/default-embed": "^0.1.8",
+    "@langchain/core": "^0.3.72",
+    "@langchain/community": "^0.3.53",
+    "@langchain/textsplitters": "^0.1.0",
+    "@vscode/ripgrep": "^1.15.14",
     "axios": "^1.9.0",
+    "chromadb": "^3.0.14",
     "concurrently": "^9.1.2",
     "electron-is-dev": "^2.0.0",
+    "electron-log": "^5.1.5",
     "electron-store": "^10.0.1",
     "fastest-levenshtein": "^1.0.16",
     "fzf": "^0.5.2",
+    "hnswlib-node": "^3.0.0",
     "https-proxy-agent": "^7.0.6",
+    "langchain": "^0.3.31",
     "lodash": "^4.17.21",
+    "mammoth": "^1.10.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.0.0",
     "p-wait-for": "^5.0.2",
+    "pdf-parse": "^1.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "^5.0.1",
     "simple-git": "^3.28.0",
-    "typescript": "^4.9.5",
-    "@vscode/ripgrep": "^1.15.14",
-    "electron-log": "^5.1.5"
+    "typescript": "^4.9.5"
   },
   "devDependencies": {
     "@types/lodash": "^4.17.6",
@@ -75,7 +85,8 @@
       "!frontend/react-app/node_modules",
       "!dist",
       "!backend/data",
-      "!novel/**/*"
+      "!novel/**/*",
+      "chroma_env/**/*"
     ],
     "extraResources": [
       {
@@ -89,6 +100,8 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
-    }
+    },
+    "npmRebuild": false,
+    "nodeGypRebuild": false
   }
 }

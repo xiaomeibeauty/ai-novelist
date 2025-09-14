@@ -24,5 +24,6 @@ contextBridge.exposeInMainWorld('electron', {
     },
     sendSaveAndQuitResponse: (result) => {
         ipcRenderer.send('save-and-quit-response', result);
-    }
+    },
+    openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

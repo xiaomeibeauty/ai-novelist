@@ -88,7 +88,14 @@ class OpenRouterAdapter extends BaseOpenAiCompatibleAdapter {
     // 覆盖父类的 listModels 方法以从 API 动态获取
     async listModels() {
         try {
-            const modelsList = await this.client.models.list();
+            const client = this._getClient(); // 确保客户端已初始化
+            const modelsList = await client.models.list();
+            // 检查 modelsList 和 modelsList.data 是否存在
+            if (!modelsList || !modelsList.data) {
+                console.warn('OpenRouter API returned empty models list, using default models');
+                return super.listModels();
+            }
+            
             const models = Array.from(modelsList.data);
             
             // 更新内部的 providerModels 缓存

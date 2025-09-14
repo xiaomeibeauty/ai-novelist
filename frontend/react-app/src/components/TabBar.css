@@ -53,3 +53,20 @@
   background-color: #555;
   color: #fff;
 }
+
+/* 已删除标签页的样式 */
+.tab-item.deleted {
+  opacity: 0.6;
+  background-color: #3a1f1f;
+  color: #ff6b6b;
+}
+
+.tab-item.deleted .tab-title {
+  text-decoration: line-through;
+}
+
+.deleted-indicator {
+  margin-left: 4px;
+  margin-right: 8px;
+  font-size: 12px;
+}

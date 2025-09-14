@@ -137,8 +137,17 @@ class OllamaAdapter extends BaseModelAdapter {
                 details: {},
             }));
         } catch (error) {
-            console.error('Error listing Ollama models:', error);
-            throw error;
+            console.warn('无法连接到Ollama服务，返回默认模型列表。错误:', error.message);
+            // 返回一个默认模型，这样前端至少能看到ollama提供商选项
+            return [{
+                id: '无模型服务',
+                object: 'model',
+                created: 0,
+                owned_by: 'ollama',
+                provider: 'ollama',
+                details: {},
+                name: '无模型服务',
+            }];
         }
     }
 

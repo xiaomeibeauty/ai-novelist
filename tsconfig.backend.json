@@ -10,7 +10,8 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "backend/**/*.ts"
+    "backend/**/*.ts",
+    "backend/**/*.js"
   ],
   "exclude": [
     "node_modules"

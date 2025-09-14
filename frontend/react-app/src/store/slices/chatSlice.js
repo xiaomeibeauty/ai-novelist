@@ -46,9 +46,11 @@ const chatSlice = createSlice({
     questionCard: null,
     deepSeekHistory: [],
     deepseekApiKey: '',
-    openaiApiKey: '', // 新增
     openrouterApiKey: '',
-    selectedModel: 'deepseek-chat',
+    aliyunEmbeddingApiKey: '', // 新增：阿里云嵌入API Key
+    intentAnalysisModel: '', // 新增：意图分析模型
+    selectedModel: '',
+    selectedProvider: '', // 取消默认的DeepSeek设置
     isHistoryPanelVisible: false,
     isDeleteMode: false,
     showSettingsModal: false,
@@ -62,6 +64,69 @@ const chatSlice = createSlice({
     },
     enableStream: true, // 新增：是否启用流式传输，默认为 true
     editingMessageId: null, // 新增：用于跟踪正在编辑的消息ID
+    ragRetrievalEnabled: false, // 新增：RAG检索启用状态（全局默认）
+    // 新增：每个模式的功能启用状态（工具功能已硬编码，只保留RAG检索）
+    modeFeatureSettings: {
+      general: {
+        ragRetrievalEnabled: false
+      },
+      outline: {
+        ragRetrievalEnabled: false
+      },
+      writing: {
+        ragRetrievalEnabled: false
+      },
+      adjustment: {
+        ragRetrievalEnabled: false
+      }
+    },
+    // 新增：上下文限制设置
+    contextLimitSettings: {
+      modes: {
+        general: {
+          chatContext: { type: 'turns', value: 20 },
+          ragContext: { type: 'turns', value: 10 }
+        },
+        outline: {
+          chatContext: { type: 'turns', value: 30 },
+          ragContext: { type: 'turns', value: 15 }
+        },
+        writing: {
+          chatContext: { type: 'turns', value: 20 },
+          ragContext: { type: 'turns', value: 15 }
+        },
+        adjustment: {
+          chatContext: { type: 'turns', value: 15 },
+          ragContext: { type: 'turns', value: 8 }
+        }
+      }
+    },
+    // 新增：附加信息/持久记忆
+    additionalInfo: {
+      general: {
+        outline: '',
+        previousChapter: '',
+        characterSettings: ''
+      },
+      outline: {
+        outline: '',
+        previousChapter: '',
+        characterSettings: ''
+      },
+      writing: {
+        outline: '',
+        previousChapter: '',
+        characterSettings: ''
+      },
+      adjustment: {
+        outline: '',
+        previousChapter: '',
+        characterSettings: ''
+      }
+    },
+    // 新增：创作模式状态
+    isCreationModeEnabled: true,
+    showCreationModal: false
   },
   reducers: {
     deleteMessage: (state, action) => {
@@ -215,11 +280,17 @@ const chatSlice = createSlice({
     setDeepseekApiKey: (state, action) => {
       state.deepseekApiKey = action.payload;
     },
-    setOpenaiApiKey: (state, action) => { // 新增
-      state.openaiApiKey = action.payload;
-    },
     setOpenrouterApiKey: (state, action) => {
       state.openrouterApiKey = action.payload;
+    },
+    setSelectedProvider: (state, action) => {
+      state.selectedProvider = action.payload;
+    },
+    setAliyunEmbeddingApiKey: (state, action) => { // 新增：设置阿里云嵌入API Key
+      state.aliyunEmbeddingApiKey = action.payload;
+    },
+    setIntentAnalysisModel: (state, action) => { // 新增：设置意图分析模型
+      state.intentAnalysisModel = action.payload;
     },
     setAvailableModels: (state, action) => { // 新增：设置可用模型列表
         state.availableModels = action.payload;
@@ -240,6 +311,65 @@ const chatSlice = createSlice({
     },
     setEnableStream: (state, action) => { // 新增：设置是否启用流式传输
         state.enableStream = action.payload;
+    },
+    setRagRetrievalEnabled: (state, action) => { // 新增：设置RAG检索启用状态
+      state.ragRetrievalEnabled = action.payload;
+    },
+    // 新增：设置特定模式的功能启用状态
+    setModeFeatureSetting: (state, action) => {
+      const { mode, feature, enabled } = action.payload;
+      if (state.modeFeatureSettings[mode]) {
+        state.modeFeatureSettings[mode][feature] = enabled;
+      }
+    },
+    // 新增：重置特定模式的所有功能设置
+    resetModeFeatureSettings: (state, action) => {
+      const { mode } = action.payload;
+      if (state.modeFeatureSettings[mode]) {
+        state.modeFeatureSettings[mode] = {
+          ragRetrievalEnabled: false
+        };
+      }
+    },
+    // 新增：设置上下文限制设置
+    setContextLimitSettings: (state, action) => {
+      state.contextLimitSettings = action.payload;
+    },
+    // 新增：设置附加信息
+    setAdditionalInfoForMode: (state, action) => {
+      const { mode, info } = action.payload;
+      state.additionalInfo[mode] = info;
+    },
+    // 新增：设置特定附加信息字段
+    setAdditionalInfoFieldForMode: (state, action) => {
+      const { mode, field, value } = action.payload;
+      if (state.additionalInfo[mode]) {
+        state.additionalInfo[mode][field] = value;
+      }
+    },
+    // 新增：重置附加信息
+    resetAdditionalInfoForMode: (state, action) => {
+      const { mode } = action.payload;
+      state.additionalInfo[mode] = {
+        outline: '',
+        previousChapter: '',
+        characterSettings: ''
+      };
+    },
+    // 新增：设置创作模式启用状态
+    setIsCreationModeEnabled: (state, action) => {
+      state.isCreationModeEnabled = action.payload;
+    },
+    // 新增：设置创作模式弹窗显示状态
+    setShowCreationModal: (state, action) => {
+      state.showCreationModal = action.payload;
+    },
+    // 新增：批量更新所有模式的附加信息
+    setAdditionalInfoForAllModes: (state, action) => {
+      const { info } = action.payload;
+      for (const mode of ['general', 'outline', 'writing', 'adjustment']) {
+        state.additionalInfo[mode] = { ...info };
+      }
     },
     // --- 新增：用于处理来自 IPC 的 AI 响应的通用 Reducer ---
     ipcAiResponseReceived: (state, action) => {
@@ -445,12 +575,29 @@ const chatSlice = createSlice({
                 } else {
                     // 否则，正常处理其他工具建议
                     if (lastMessageForSuggestions && lastMessageForSuggestions.role === 'assistant') {
+                        // 保留已有的文字内容，只添加工具调用信息
+                        const toolCallInfo = JSON.stringify(suggestions, null, 2);
                         try {
-                            lastMessageForSuggestions.content = JSON.stringify(suggestions, null, 2);
-                            lastMessageForSuggestions.text = JSON.stringify(suggestions, null, 2);
+                            // 如果已有内容，则追加工具调用信息，否则只显示工具调用
+                            if (lastMessageForSuggestions.content && lastMessageForSuggestions.content.trim()) {
+                                lastMessageForSuggestions.content += `\n\n--- 工具调用请求 ---\n${toolCallInfo}`;
+                                lastMessageForSuggestions.text += `\n\n--- 工具调用请求 ---\n${toolCallInfo}`;
+                            } else {
+                                lastMessageForSuggestions.content = toolCallInfo;
+                                lastMessageForSuggestions.text = toolCallInfo;
+                            }
                         } catch (e) {
-                            lastMessageForSuggestions.content = suggestions;
-                            lastMessageForSuggestions.text = suggestions;
+                            // 如果JSON序列化失败，使用原始建议数据
+                            const fallbackInfo = Array.isArray(suggestions) ?
+                                suggestions.map(tool => tool.function?.name || '未知工具').join(', ') :
+                                String(suggestions);
+                            if (lastMessageForSuggestions.content && lastMessageForSuggestions.content.trim()) {
+                                lastMessageForSuggestions.content += `\n\n--- 工具调用请求 ---\n${fallbackInfo}`;
+                                lastMessageForSuggestions.text += `\n\n--- 工具调用请求 ---\n${fallbackInfo}`;
+                            } else {
+                                lastMessageForSuggestions.content = fallbackInfo;
+                                lastMessageForSuggestions.text = fallbackInfo;
+                            }
                         }
                         lastMessageForSuggestions.toolCalls = suggestions.map(tool => ({
                             id: tool.toolCallId,
@@ -536,12 +683,25 @@ export const {
   setDeepseekApiKey,
   setOpenaiApiKey, // 新增
   setOpenrouterApiKey,
+  setSelectedProvider, // 新增：导出 setSelectedProvider
+  setAliyunEmbeddingApiKey, // 新增：导出 setAliyunEmbeddingApiKey
+  setIntentAnalysisModel, // 新增：导出 setIntentAnalysisModel
   setAvailableModels, // 新增：导出 setAvailableModels
   setCustomSystemPrompt, // 新增：导出 setCustomSystemPrompt
   resetCustomSystemPrompt, // 新增：导出 resetCustomSystemPrompt
   setCustomPromptForMode, // 新增：导出 setCustomPromptForMode
   resetCustomPromptForMode, // 新增：导出 resetCustomPromptForMode
   setEnableStream, // 新增：导出 setEnableStream
+  setRagRetrievalEnabled, // 新增：导出 setRagRetrievalEnabled
+  setModeFeatureSetting, // 新增：导出 setModeFeatureSetting
+  resetModeFeatureSettings, // 新增：导出 resetModeFeatureSettings
+  setContextLimitSettings, // 新增：导出 setContextLimitSettings
+  setAdditionalInfoForMode, // 新增：导出 setAdditionalInfoForMode
+  setAdditionalInfoFieldForMode, // 新增：导出 setAdditionalInfoFieldForMode
+  resetAdditionalInfoForMode, // 新增：导出 resetAdditionalInfoForMode
+  setIsCreationModeEnabled, // 新增：导出 setIsCreationModeEnabled
+  setShowCreationModal, // 新增：导出 setShowCreationModal
+  setAdditionalInfoForAllModes, // 新增：导出 setAdditionalInfoForAllModes
   deleteMessage,
   startEditing,
   // submitEdit,

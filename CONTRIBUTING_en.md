@@ -65,7 +65,12 @@ We welcome code contributions! Please follow these steps:
 
 ## License
 
-This project uses the [MIT License](LICENSE).
+This project uses the [MIT License](LICENSE). The MIT License explicitly permits commercial use, modification, distribution, and private deployment.
+
+**Commercial Use Statement**:
+- This project's code may be used for commercial purposes, including but not limited to SaaS services, product integration, commercial distribution, etc.
+- Contributors confirm through DCO signing that their code is licensed under the MIT License
+- Project maintainers reserve the right to develop commercial products and services based on this project
 
 ## CLA Policy (Future Consideration)
 

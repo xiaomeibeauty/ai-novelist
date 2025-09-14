@@ -11,6 +11,7 @@ frontend/react-app/node_modules/
 
 # Build artifacts
 dist/
+dist-backend/
 frontend/react-app/build/
 
 # IDE and Editor files
@@ -30,6 +31,95 @@ backend/data/
 
 # Lock files
 mcp-filesystem-server.lock
-
 # Other ignored files
 *.bak
+
+# Runtime and dependency files
+node/
+python_portable/
+
+# Database files
+db/
+
+# Static assets (unless they are source files)
+public/
+images/
+
+# Build outputs and temporary files
+*.tmp
+*.temp
+.cache/
+.nyc_output/
+coverage/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.backup
+*.swp
+*.swo
+*~
+
+# Configuration files (user-specific)
+.npmrc
+
+# Temporary installation files
+get-pip.py
+
+# Test files
+test-additional-info.js
+
+# Batch files (if not needed for deployment)
+start.bat
+*~
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.tox/
+
+# ChromaDB and vector database files
+chroma.sqlite3
+chroma.sqlite3-journal
+*.chroma
+
+# Electron specific
+app/build/
+app/dist/
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.snap
+
+# Development and testing
+.nyc_output/
+.nyc_output/*
+test-results/
+jest-test-results.xml
+cypress/videos/
+cypress/screenshots/
+
+# Package managers
+yarn.lock
+package-lock.json
+pnpm-lock.yaml
+
+# IDE specific (additional)
+*.swp
+*.swo
+*~
+.~lock.*

@@ -1,5 +1,14 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 
+// 提取文件名的辅助函数（浏览器环境兼容）
+const getFileName = (filePath) => {
+  // 移除 novel/ 前缀
+  const cleanPath = filePath.replace(/^novel\//, '');
+  // 提取文件名（不含扩展名）
+  const baseName = cleanPath.split('/').pop().split('\\').pop();
+  return baseName.replace(/\.txt$/, '');
+};
+
 // 异步 action 来创建小说文件
 export const createNovelFile = createAsyncThunk(
   'novel/createNovelFile',
@@ -205,6 +214,43 @@ const novelSlice = createSlice({
       // 触发章节列表刷新
       state.refreshCounter += 1;
     },
+    // 新增：处理文件删除事件
+    fileDeleted: (state, action) => {
+      const { filePath } = action.payload;
+      const cleanFilePath = filePath.startsWith('novel/') ? filePath.substring(6) : filePath;
+      
+      // 标记标签页为已删除状态
+      const tab = state.openTabs.find(t => t.id === cleanFilePath);
+      if (tab) {
+        tab.isDeleted = true;
+        // 如果删除的是当前激活的标签页，切换到下一个可用的标签页
+        if (state.activeTabId === cleanFilePath) {
+          const availableTabs = state.openTabs.filter(t => !t.isDeleted);
+          if (availableTabs.length > 0) {
+            state.activeTabId = availableTabs[0].id;
+          } else {
+            state.activeTabId = null;
+          }
+        }
+      }
+    },
+    // 新增：处理文件重命名事件
+    fileRenamed: (state, action) => {
+      const { oldFilePath, newFilePath } = action.payload;
+      const cleanOldPath = oldFilePath.startsWith('novel/') ? oldFilePath.substring(6) : oldFilePath;
+      const cleanNewPath = newFilePath.startsWith('novel/') ? newFilePath.substring(6) : newFilePath;
+      
+      // 更新标签页的ID和标题
+      const tab = state.openTabs.find(t => t.id === cleanOldPath);
+      if (tab) {
+        tab.id = cleanNewPath;
+        tab.title = getFileName(cleanNewPath);
+        // 如果是当前激活的标签页，也更新activeTabId
+        if (state.activeTabId === cleanOldPath) {
+          state.activeTabId = cleanNewPath;
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -216,7 +262,7 @@ const novelSlice = createSlice({
         const newFilePath = action.payload.newFilePath;
         const newTab = {
           id: newFilePath,
-          title: newFilePath.replace(/^novel\//, '').replace(/\.txt$/, ''),
+          title: getFileName(newFilePath),
           content: '',
           originalContent: null,
           suggestedContent: null,
@@ -242,7 +288,7 @@ const novelSlice = createSlice({
         const tab = state.openTabs.find(t => t.id === oldFilePath);
         if (tab) {
           tab.id = newFilePath;
-          tab.title = newFilePath.replace(/^novel\//, '').replace(/\.txt$/, '');
+          tab.title = getFileName(newFilePath);
         }
 
         // 如果是当前激活的 tab，也更新 activeTabId
@@ -268,7 +314,7 @@ const novelSlice = createSlice({
         const { filePath, content } = action.payload;
         const newTab = {
           id: filePath,
-          title: filePath.replace(/^novel\//, '').replace(/\.txt$/, ''),
+          title: getFileName(filePath),
           content: content,
           originalContent: null, // This should be the content from disk
           suggestedContent: null,
@@ -297,5 +343,7 @@ export const {
   triggerChapterRefresh,
   syncFileContent,
   fileWritten,
+  fileDeleted,
+  fileRenamed,
 } = novelSlice.actions;
 export default novelSlice.reducer;

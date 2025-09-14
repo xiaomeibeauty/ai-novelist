@@ -33,7 +33,7 @@ async function chatWithDeepSeek(latestUserMessageContent) {
             const Store = StoreModule.default;
             storeInstance = new Store();
         }
-        const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+        const defaultModelId = storeInstance.get('selectedModel') || storeInstance.get('selectedModel') || '';
 
         console.log(`[DeepSeek] 代理调用 chatService.chatWithAI，模型: ${defaultModelId}`);
         return await chatService.chatWithAI(latestUserMessageContent, defaultModelId);
@@ -52,7 +52,7 @@ async function sendToolResultToDeepSeek(toolResultsArray) {
             const Store = StoreModule.default;
             storeInstance = new Store();
         }
-        const defaultModelId = storeInstance.get('defaultAiModel') || 'deepseek-chat';
+        const defaultModelId = storeInstance.get('selectedModel') || storeInstance.get('selectedModel') || '';
 
         console.log(`[DeepSeek] 代理调用 chatService.sendToolResultToAI，模型: ${defaultModelId}`);
         return await chatService.sendToolResultToAI(toolResultsArray, defaultModelId);

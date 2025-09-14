@@ -11,18 +11,21 @@ class ModelRegistry {
      * @param {string} name - 适配器名称。
      * @param {BaseModelAdapter} adapterInstance - 适配器实例。
      */
-    async registerAdapter(name, adapterInstance) { // 变为 async
+    async registerAdapter(name, adapterInstance) {
         if (!(adapterInstance instanceof BaseModelAdapter)) {
             throw new Error("Registered adapter must be an instance of BaseModelAdapter.");
         }
         if (this.adapters[name]) {
-            console.warn(`适配器 '${name}' 已存在，将被覆盖。`);
+            console.warn(`[API设置调试] 适配器 '${name}' 已存在，将被覆盖。`);
         }
 
         this.adapters[name] = adapterInstance;
 
         // 注册此适配器支持的所有模型
         const models = await adapterInstance.listModels(); // 添加 await
+        
+        console.log(`[API设置调试] 适配器 '${name}' 注册了 ${models.length} 个模型`);
+        
         models.forEach(modelInfo => {
             let modelId = modelInfo.id;
             // 为 openrouter 和 ollama 模型ID添加提供商前缀，以确保唯一性
@@ -33,10 +36,10 @@ class ModelRegistry {
             }
 
             if (this.modelMapping[modelId] && this.modelMapping[modelId] !== name) {
-                console.warn(`模型 '${modelId}' 已被适配器 '${this.modelMapping[modelId]}' 注册，将被适配器 '${name}' 覆盖。`);
+                console.warn(`[API设置调试] 模型 '${modelId}' 已被适配器 '${this.modelMapping[modelId]}' 注册，将被适配器 '${name}' 覆盖。`);
             }
             this.modelMapping[modelId] = name;
-            console.log(`已注册模型: ${modelId} -> ${name}`);
+            console.log(`[API设置调试] 已注册模型: ${modelId} -> ${name}`);
         });
     }
 

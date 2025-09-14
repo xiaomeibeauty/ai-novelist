@@ -12,10 +12,20 @@ export const saveArchive = async (taskId, message) => {
 
 export const restoreNovelArchive = async (taskId, archiveId) => {
   try {
-    const result = await ipcRenderer.invoke('checkpoints:restore', { taskId, archiveId });
+    const result = await ipcRenderer.invoke('checkpoints:restoreNovel', { taskId, archiveId });
     return result;
   } catch (error) {
-    console.error('Error restoring archive:', error);
+    console.error('Error restoring novel archive:', error);
+    throw error;
+  }
+};
+
+export const restoreChatCheckpoint = async (taskId, archiveId) => {
+  try {
+    const result = await ipcRenderer.invoke('checkpoints:restoreChat', { taskId, archiveId });
+    return result;
+  } catch (error) {
+    console.error('Error restoring chat checkpoint:', error);
     throw error;
   }
 };
