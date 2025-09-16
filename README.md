@@ -32,11 +32,11 @@
 ## 快速开始：本地部署
 
 ### 环境条件
-
+#### Windows11操作系统 √
 *   Node.js (测试用版本v20.19.4)
 *   npm 或 yarn（测试版本11.6.0）
 *   Python 3.8+ (测试版本3.12.3)
-
+*   windows_build_tools (实际使用Microsoft Visual C++ Build Tools 2022)
 ### 安装
 
 1.  **克隆仓库**:
