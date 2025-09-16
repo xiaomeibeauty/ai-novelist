@@ -33,47 +33,52 @@
 
 ### 环境条件
 
-*   Node.js (推荐 LTS 版本)
-*   npm 或 yarn
-*   Python 3.8+ (用于 ChromaDB 向量数据库)
-*   ChromaDB Python 包 (通过 `pip install chromadb` 安装)
+*   Node.js (测试用版本v20.19.4)
+*   npm 或 yarn（测试版本11.6.0）
+*   Python 3.8+ (测试版本3.12.3)
 
 ### 安装
 
 1.  **克隆仓库**:
     ```bash
     git clone git@github.com:18643751823/ai-novelist.git
-    cd ai-novel
+    cd ai-novelist
     ```
 
-2.  **安装 Python 依赖**:
+2.  **安装Python的包**:
     确保已安装 Python 3.8+，然后安装 ChromaDB:
     ```bash
     pip install chromadb
     ```
 
-3.  **安装后端依赖**:
-    在项目根目录 (`ai-novel/`) 下执行：
+3.  **安装项目依赖**:
+    在项目根目录 (`ai-novelist/`) 下执行依赖安装
     ```bash
     npm install
     ```
-
-4.  **安装前端依赖**:
-    进入前端目录 (`ai-novel/frontend/react-app/`) 并执行：
+    进入前端目录
     ```bash
     cd frontend/react-app
+    ```
+    执行依赖安装
+    ```bash
     npm install
+    ```
+4.  **前端和后端的建立**:
+   使用提供的 npm 脚本构建项目的后端和前端组件
+    ```bash
+    npm run build:backend
+    npm run build:react
     ```
 
 ### 运行应用
 
 **启动 Electron 应用**:
-项目根目录 (`ai-novel/`) 执行：
+项目根目录 (`ai-novelist/`) 执行：
 ```bash
 npm run start:full .
 ```
 
-应用会自动启动 ChromaDB 服务器（监听端口 8000）。如果端口 8000 被占用，应用会自动尝试其他端口。
 
 **注意**: 首次运行时，ChromaDB 需要一些时间来初始化数据库。
 
