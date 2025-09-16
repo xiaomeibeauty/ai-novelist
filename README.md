@@ -33,10 +33,10 @@
 
 ### 环境条件
 #### Windows11操作系统 √
-*   Node.js (测试用版本v20.19.4)
-*   npm 或 yarn（测试版本11.6.0）
-*   Python 3.8+ (测试版本3.12.3)
-*   windows_build_tools (实际使用Microsoft Visual C++ Build Tools 2022)
+*   Node.js (v20.19.4测试通过)
+*   npm 或 yarn（npm 11.6.0测试通过）
+*   Python 3.8+ (3.12.3测试通过)
+*   windows_build_tools (可以使用Microsoft Visual C++ Build Tools 2022)
 ### 安装
 
 1.  **克隆仓库**:
