@@ -29,44 +29,51 @@ Qingzhu (Official Name) is a desktop application built on the Electron framework
 
 ## Quick Start
 
-### Prerequisites
-
-*   Node.js (LTS version recommended)
-*   npm or yarn
-*   Python 3.8+ (for ChromaDB vector database)
-*   ChromaDB Python package (install via `pip install chromadb`)
+### Environmental Requirements
+#### Windows 11 Operating System √
+*   Node.js (v20.19.4 tested)
+*   npm or yarn (npm 11.6.0 tested)
+*   Python 3.8+ (3.12.3 tested)
+*   windows_build_tools (Microsoft Visual C++ Build Tools 2022 can be used)
 
 ### Installation
 
 1.  **Clone the repository**:
     ```bash
-    git clone git@github.com:18643751823/ai-novelist.git
-    cd ai-novel
+    git clone https://github.com/18643751823/ai-novelist
+    cd ai-ist
     ```
 
-2.  **Install Python dependencies**:
+2.  **Install Python packages**:
     Ensure Python 3.8+ is installed, then install ChromaDB:
     ```bash
     pip install chromadb
     ```
 
-3.  **Install backend dependencies**:
-    Execute in the project root directory (`ai-novel/`):
+3.  **Install project dependencies**:
+    Execute in the project root directory (ai-novelist/)
     ```bash
     npm install
     ```
-
-4.  **Install frontend dependencies**:
-    Navigate to the frontend directory (`ai-novel/frontend/react-app/`) and execute:
+    Go to the front-end directory
     ```bash
     cd frontend/react-app
-    npm install
     ```
-
+    Install dependencies
+    ```bash
+    npm install
+    cd ../..
+    ```
+4.  **Building Backend and Frontend**:
+    The project's backend and frontend components were then built using the provided npm scripts.
+    ```bash
+    npm run build:backend
+    npm run build:react
+    ```
 ### Running the Application
 
 **Start Electron application**:
-Execute in the project root directory (`ai-novel/`):
+Execute in the project root directory (`ai-novelist/`):
 ```bash
 npm run start:full .
 ```
