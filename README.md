@@ -41,7 +41,7 @@
 
 1.  **克隆仓库**:
     ```bash
-    git clone git@github.com:18643751823/ai-novelist.git
+    git clone https://github.com/18643751823/ai-novelist
     cd ai-novelist
     ```
 
