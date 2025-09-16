@@ -41,7 +41,7 @@ Qingzhu (Official Name) is a desktop application built on the Electron framework
 1.  **Clone the repository**:
     ```bash
     git clone https://github.com/18643751823/ai-novelist
-    cd ai-ist
+    cd ai-novelist
     ```
 
 2.  **Install Python packages**:
