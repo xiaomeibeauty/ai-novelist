@@ -79,6 +79,9 @@ test-additional-info.js
 start.bat
 *~
 
+# Portable Git (for distribution, not version control)
+PortableGit/
+
 # Python specific
 __pycache__/
 *.py[cod]

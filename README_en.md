@@ -79,13 +79,15 @@ The application will automatically start the ChromaDB server (listening on port 
 After the application starts, you need to enter your DeepSeek API Key in the application's settings interface. This API Key will be securely stored via `electron-store`.
 
 
-## Contribution Rules
-- All code commits must include a `Signed-off-by` line (in compliance with [DCO](https://developercertificate.org/)).
-- Contributors confirm that their code is licensed under the [MIT License](LICENSE).
-- All code must be original or compatible with the MIT License, without additional restrictions.
-- Introduction of code with incompatible licenses such as GPL/AGPL is prohibited.
+## Contribution
 
-We welcome and thank all contributors! If you have any bug reports, feature suggestions, or wish to submit code, please feel free to contact us via GitHub Issues or Pull Requests.
+We welcome all forms of contributions! If you find bugs, have feature suggestions, or wish to submit code, please feel free to participate via GitHub Issues or Pull Requests.
+
+To maintain the project's healthy development, please ensure:
+- Submitted code is compatible with the [MIT License](LICENSE)
+- Avoid introducing code that is incompatible with the MIT License
+
+Thank you for your support!
 
 ## License
 

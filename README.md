@@ -5,7 +5,7 @@
 ![项目截图](images/示例图片.png)
 ## 项目介绍
 
-青烛（正式名） 是一个基于 Electron 框架构建的桌面应用程序，旨在为用户提供一个AI辅助小说创作的平台。
+青烛（正式名） 是一个基于 Electron 框架构建的桌面应用程序，旨在做一个写作版ai ide。
 
 **核心功能**:
 *   **AI 智能交互**: 与AI进行实时对话，从提供灵感到正文写作，修改润色等，写作全流程的智能辅助。
@@ -79,13 +79,15 @@ npm run start:full .
 应用启动后，您需要在应用的设置界面中输入您的 DeepSeek API Key。此API Key将通过 `electron-store` 进行安全存储。
 
 
-## 贡献规则
-- 所有代码提交必须包含 `Signed-off-by` 行（符合 [DCO](https://developercertificate.org/)）。
-- 贡献者确认其代码依据 [MIT 协议](LICENSE) 授权。
-- 所有代码必须是原创或兼容 MIT 协议，不可附加额外限制。
-- 禁止引入 GPL/AGPL 等非兼容许可证的代码。
+## 贡献
 
-我们欢迎并感谢所有贡献者！如果您有任何 Bug 报告、功能建议或希望提交代码，请随时通过 GitHub Issues 或 Pull Requests 与我们联系。
+我们欢迎各种形式的贡献！如果您发现 Bug、有功能建议或希望提交代码，请随时通过 GitHub Issues 或 Pull Requests 参与。
+
+为了保持项目的健康发展，请确保：
+- 提交的代码与 [MIT 协议](LICENSE) 兼容
+- 避免引入与 MIT 协议不兼容的代码
+
+感谢每一位贡献者的支持！
 
 ## 许可证
 
