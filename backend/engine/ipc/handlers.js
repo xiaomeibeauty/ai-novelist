@@ -374,6 +374,17 @@ const handleDeleteKbFile = async (event, filename) => {
     }
 };
 
+// 新增：处理重命名知识库文件请求
+const handleRenameKbFile = async (event, oldFilename, newFilename) => {
+    try {
+        const result = await knowledgeBaseManager.renameFile(oldFilename, newFilename);
+        return result;
+    } catch (error) {
+        console.error('[handlers.js] 重命名知识库文件失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
 // 处理工具取消请求
 const handleCancelTool = async (event, toolName, toolArgs, toolCallId) => {
     console.log(`收到取消工具请求: ${toolName}，参数:`, toolArgs);
@@ -1342,6 +1353,7 @@ function register(store) { // 接收 store 参数并设置全局实例
   ipcMain.handle('add-file-to-kb', handleAddFileToKb); // 新增：注册添加文件到知识库的处理器
   ipcMain.handle('list-kb-files', handleListKbFiles); // 新增：注册列出知识库文件处理器
   ipcMain.handle('delete-kb-file', handleDeleteKbFile); // 新增：注册删除知识库文件处理器
+  ipcMain.handle('rename-kb-file', handleRenameKbFile); // 新增：注册重命名知识库文件处理器
   
 
   // 新增：上下文限制设置处理器
@@ -1639,6 +1651,11 @@ function register(store) { // 接收 store 参数并设置全局实例
   // 新增：重新初始化阿里云嵌入函数处理器
   ipcMain.handle('reinitialize-aliyun-embedding', async () => {
     return await ragIpcHandler.reinitializeAliyunEmbedding();
+  });
+
+  // 新增：获取知识库集合列表处理器
+  ipcMain.handle('list-kb-collections', async () => {
+    return await ragIpcHandler.listKbCollections();
   });
 
 

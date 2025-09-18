@@ -132,6 +132,41 @@ class CollectionManager {
     }
 
     /**
+     * 保存集合元数据到持久化存储
+     */
+    saveCollectionMetadataToStore() {
+        if (!this.storeInstance) {
+            console.warn("[CollectionManager] store实例未设置，无法保存集合元数据");
+            return;
+        }
+        
+        const metadataToSave = {};
+        for (const [collectionName, metadata] of this.collectionMetadata) {
+            metadataToSave[collectionName] = metadata;
+        }
+        
+        this.storeInstance.set('collectionMetadata', metadataToSave);
+        console.log("[CollectionManager] 集合元数据已保存到持久化存储");
+    }
+
+    /**
+     * 从持久化存储加载集合元数据
+     */
+    loadCollectionMetadataFromStore() {
+        if (!this.storeInstance) {
+            console.warn("[CollectionManager] store实例未设置，无法加载集合元数据");
+            return;
+        }
+        
+        const savedMetadata = this.storeInstance.get('collectionMetadata') || {};
+        for (const [collectionName, metadata] of Object.entries(savedMetadata)) {
+            this.collectionMetadata.set(collectionName, metadata);
+        }
+        
+        console.log("[CollectionManager] 集合元数据已从持久化存储加载");
+    }
+
+    /**
      * 设置存储实例以便后续使用
      * @param {Object} store electron-store实例
      */
@@ -154,6 +189,9 @@ class CollectionManager {
             // 初始化嵌入函数（会自动从store读取最新API Key）
             this.initializeEmbeddingFunction();
             
+            // 首先从持久化存储加载集合元数据
+            this.loadCollectionMetadataFromStore();
+            
             // 获取所有现有集合并加载到注册表
             const existingCollections = await this.client.listCollections();
             for (const collectionInfo of existingCollections) {
@@ -164,21 +202,35 @@ class CollectionManager {
                     });
                     
                     this.collections.set(collectionInfo.name, collection);
-                    this.collectionMetadata.set(collectionInfo.name, {
-                        filename: this.extractFilenameFromCollectionName(collectionInfo.name),
-                        createdAt: new Date().toISOString(),
-                        documentCount: 0
-                    });
                     
-                    // 获取集合中的文档数量
-                    const documents = await collection.get();
-                    this.collectionMetadata.get(collectionInfo.name).documentCount = documents.ids.length;
+                    // 如果持久化存储中有这个集合的元数据，使用保存的数据
+                    if (this.collectionMetadata.has(collectionInfo.name)) {
+                        const savedMetadata = this.collectionMetadata.get(collectionInfo.name);
+                        // 只更新文档数量，保持其他元数据不变
+                        const documents = await collection.get();
+                        savedMetadata.documentCount = documents.ids.length;
+                    } else {
+                        // 如果没有保存的元数据，创建新的元数据条目
+                        this.collectionMetadata.set(collectionInfo.name, {
+                            filename: this.extractFilenameFromCollectionName(collectionInfo.name),
+                            originalFilename: this.extractFilenameFromCollectionName(collectionInfo.name),
+                            createdAt: new Date().toISOString(),
+                            documentCount: 0
+                        });
+                        
+                        // 获取集合中的文档数量
+                        const documents = await collection.get();
+                        this.collectionMetadata.get(collectionInfo.name).documentCount = documents.ids.length;
+                    }
                     
                 } catch (error) {
                     console.warn(`[CollectionManager] 加载集合 ${collectionInfo.name} 失败:`, error);
                 }
             }
 
+            // 保存更新后的元数据到持久化存储
+            this.saveCollectionMetadataToStore();
+            
             this.isInitialized = true;
             console.log("[CollectionManager] 初始化成功，已加载", this.collections.size, "个集合");
         } catch (error) {
@@ -221,6 +273,15 @@ class CollectionManager {
      * @returns {string} 原始文件名
      */
     extractFilenameFromCollectionName(collectionName) {
+        // 首先尝试从元数据中获取保存的原始文件名
+        if (this.collectionMetadata.has(collectionName)) {
+            const metadata = this.collectionMetadata.get(collectionName);
+            if (metadata && metadata.originalFilename) {
+                return metadata.originalFilename;
+            }
+        }
+        
+        // 如果没有保存原始文件名，使用向后兼容的恢复逻辑
         // 移除前缀并恢复文件名
         return collectionName.replace(/^kb-/, '').replace(/_/g, ' ') + '.txt';
     }
@@ -242,9 +303,19 @@ class CollectionManager {
 
         const collectionName = this.normalizeCollectionName(filename);
         
-        // 如果集合已存在，直接返回
+        // 如果集合已存在，确保文档数量是最新的
         if (this.collections.has(collectionName)) {
-            return this.collections.get(collectionName);
+            const collection = this.collections.get(collectionName);
+            // 更新文档数量到最新状态
+            try {
+                const documents = await collection.get();
+                if (this.collectionMetadata.has(collectionName)) {
+                    this.collectionMetadata.get(collectionName).documentCount = documents.ids.length;
+                }
+            } catch (error) {
+                console.warn(`[CollectionManager] 更新集合 ${collectionName} 文档数量失败:`, error);
+            }
+            return collection;
         }
 
         try {
@@ -260,9 +331,13 @@ class CollectionManager {
             this.collections.set(collectionName, collection);
             this.collectionMetadata.set(collectionName, {
                 filename: path.basename(filename),
+                originalFilename: path.basename(filename), // 保存原始文件名
                 createdAt: new Date().toISOString(),
                 documentCount: 0
             });
+            
+            // 保存元数据到持久化存储
+            this.saveCollectionMetadataToStore();
             
             console.log(`[CollectionManager] 集合 ${collectionName} 创建成功`);
             return collection;
@@ -282,9 +357,13 @@ class CollectionManager {
                 const documents = await collection.get();
                 this.collectionMetadata.set(collectionName, {
                     filename: path.basename(filename),
+                    originalFilename: path.basename(filename), // 保存原始文件名
                     createdAt: new Date().toISOString(),
                     documentCount: documents.ids.length
                 });
+                
+                // 保存元数据到持久化存储
+                this.saveCollectionMetadataToStore();
                 
                 return collection;
             }
@@ -295,6 +374,7 @@ class CollectionManager {
 
     /**
      * 获取所有集合的元数据列表
+     * 每次调用都会从ChromaDB获取最新的文档数量，确保数据准确性
      * @returns {Array} 集合元数据数组
      */
     async listCollections() {
@@ -303,13 +383,61 @@ class CollectionManager {
         }
 
         const collections = [];
-        for (const [collectionName, metadata] of this.collectionMetadata) {
-            collections.push({
-                collectionName: collectionName,
-                filename: metadata.filename,
-                createdAt: metadata.createdAt,
-                documentCount: metadata.documentCount
-            });
+        
+        // 获取所有现有集合
+        const existingCollections = await this.client.listCollections();
+        
+        for (const collectionInfo of existingCollections) {
+            try {
+                // 获取集合对象
+                const collection = await this.client.getCollection({
+                    name: collectionInfo.name,
+                    embeddingFunction: this.embeddingFunction
+                });
+                
+                // 获取最新的文档数量
+                const documents = await collection.get();
+                const documentCount = documents.ids.length;
+                
+                // 更新内存中的元数据
+                if (this.collectionMetadata.has(collectionInfo.name)) {
+                    this.collectionMetadata.get(collectionInfo.name).documentCount = documentCount;
+                } else {
+                    // 如果集合不在内存中，创建新的元数据条目
+                    this.collectionMetadata.set(collectionInfo.name, {
+                        filename: this.extractFilenameFromCollectionName(collectionInfo.name),
+                        createdAt: new Date().toISOString(),
+                        documentCount: documentCount
+                    });
+                }
+                
+                // 确保集合在内存中
+                if (!this.collections.has(collectionInfo.name)) {
+                    this.collections.set(collectionInfo.name, collection);
+                }
+                
+                // 添加到返回结果
+                const metadata = this.collectionMetadata.get(collectionInfo.name);
+                collections.push({
+                    collectionName: collectionInfo.name,
+                    filename: metadata.filename,
+                    createdAt: metadata.createdAt,
+                    documentCount: metadata.documentCount
+                });
+                
+            } catch (error) {
+                console.warn(`[CollectionManager] 获取集合 ${collectionInfo.name} 信息失败:`, error);
+                // 如果获取失败，使用内存中的缓存数据
+                if (this.collectionMetadata.has(collectionInfo.name)) {
+                    const metadata = this.collectionMetadata.get(collectionInfo.name);
+                    collections.push({
+                        collectionName: collectionInfo.name,
+                        filename: metadata.filename,
+                        createdAt: metadata.createdAt,
+                        documentCount: metadata.documentCount
+                    });
+                }
+            }
         }
 
         return collections;
@@ -339,6 +467,9 @@ class CollectionManager {
                 this.collections.delete(expectedCollectionName);
                 this.collectionMetadata.delete(expectedCollectionName);
                 
+                // 保存更新后的元数据到持久化存储
+                this.saveCollectionMetadataToStore();
+                
                 console.log(`[CollectionManager] 集合 ${expectedCollectionName} 删除成功`);
                 return { success: true, message: `集合 ${expectedCollectionName} 已删除` };
                 
@@ -362,12 +493,93 @@ class CollectionManager {
                     this.collections.delete(collectionName);
                     this.collectionMetadata.delete(collectionName);
                     
+                    // 保存更新后的元数据到持久化存储
+                    this.saveCollectionMetadataToStore();
+                    
                     console.log(`[CollectionManager] 集合 ${collectionName} 删除成功`);
                     return { success: true, message: `集合 ${collectionName} 已删除` };
                     
                 } catch (error) {
                     console.error(`[CollectionManager] 删除集合失败: ${collectionName}`, error);
                     return { success: false, error: `删除集合失败: ${error.message}` };
+                }
+            }
+        }
+        
+        return { success: false, error: `集合不存在: ${expectedCollectionName}` };
+    }
+
+    /**
+     * 重命名集合（实际上是修改集合的显示名称）
+     * @param {string} oldFilename 原文件名
+     * @param {string} newFilename 新文件名
+     * @returns {Promise<Object>} 重命名结果
+     */
+    async renameCollection(oldFilename, newFilename) {
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+
+        // 首先尝试使用标准化的集合名称查找
+        const expectedCollectionName = this.normalizeCollectionName(oldFilename);
+        
+        // 检查标准化的集合名称是否存在
+        if (this.collections.has(expectedCollectionName)) {
+            try {
+                console.log(`[CollectionManager] 重命名集合: ${expectedCollectionName} -> ${newFilename}`);
+                
+                // 获取集合元数据
+                const metadata = this.collectionMetadata.get(expectedCollectionName);
+                if (!metadata) {
+                    return { success: false, error: `集合元数据不存在: ${expectedCollectionName}` };
+                }
+
+                // 更新文件名和原始文件名
+                metadata.filename = path.basename(newFilename);
+                metadata.originalFilename = path.basename(newFilename);
+                
+                // 保存更新后的元数据到持久化存储
+                this.saveCollectionMetadataToStore();
+                
+                console.log(`[CollectionManager] 集合 ${expectedCollectionName} 重命名成功`);
+                return {
+                    success: true,
+                    message: `集合重命名成功`,
+                    collectionName: expectedCollectionName, // 集合名称不变，只修改显示名称
+                    newFilename: path.basename(newFilename)
+                };
+                
+            } catch (error) {
+                console.error(`[CollectionManager] 重命名集合失败: ${expectedCollectionName}`, error);
+                return { success: false, error: `重命名集合失败: ${error.message}` };
+            }
+        }
+        
+        // 如果没有找到标准化的集合名称，尝试查找匹配的文件名
+        const baseOldFilename = path.basename(oldFilename);
+        for (const [collectionName, metadata] of this.collectionMetadata) {
+            if (metadata.filename === baseOldFilename) {
+                try {
+                    console.log(`[CollectionManager] 重命名集合: ${collectionName} -> ${newFilename}`);
+                    
+                    // 更新文件名和原始文件名
+                    metadata.filename = path.basename(newFilename);
+                    metadata.originalFilename = path.basename(newFilename);
+                    
+                    // 保存更新后的元数据到持久化存储
+                    this.saveCollectionMetadataToStore();
+                    
+                    console.log(`[CollectionManager] 集合 ${collectionName} 重命名成功`);
+                    return {
+                        success: true,
+                        message: `集合重命名成功`,
+                        collectionName: collectionName,
+                        newFilename: path.basename(newFilename)
+                    };
+                    
+                } catch (error) {
+                    console.error(`[CollectionManager] 重命名集合失败: ${collectionName}`, error);
+                    return { success: false, error: `重命名集合失败: ${error.message}` };
                 }
             }
         }
@@ -405,7 +617,6 @@ class CollectionManager {
         } else {
             // 查询指定集合
             targetCollections = collectionNames
-                .map(name => this.normalizeCollectionName(name))
                 .filter(name => this.collections.has(name))
                 .map(name => this.collections.get(name));
         }

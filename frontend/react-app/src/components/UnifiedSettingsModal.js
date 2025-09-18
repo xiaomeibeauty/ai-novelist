@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { setShowSettingsModal } from '../store/slices/chatSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTimes, faSave, faCancel, faCog, faSlidersH, faDatabase } from '@fortawesome/free-solid-svg-icons';
+import { faTimes, faSave, faCancel, faCog, faSlidersH, faDatabase, faBook } from '@fortawesome/free-solid-svg-icons';
 import ApiSettingsTab from './ApiSettingsTab';
 import GeneralSettingsTab from './GeneralSettingsTab';
 import MemorySettingsTab from './MemorySettingsTab';
+import RagKnowledgeBaseSettings from './RagKnowledgeBaseSettings';
 import NotificationModal from './NotificationModal';
 import './PromptManagerModal.css'; // 复用标签页样式
 
@@ -67,6 +68,12 @@ const UnifiedSettingsModal = ({ isOpen, onClose }) => {
               <FontAwesomeIcon icon={faSlidersH} /> 通用设置
             </button>
             <button
+              className={`tab-button ${activeTab === 'rag' ? 'active' : ''}`}
+              onClick={() => setActiveTab('rag')}
+            >
+              <FontAwesomeIcon icon={faBook} /> RAG知识库
+            </button>
+            <button
               className={`tab-button ${activeTab === 'memory' ? 'active' : ''}`}
               onClick={() => setActiveTab('memory')}
             >
@@ -77,6 +84,7 @@ const UnifiedSettingsModal = ({ isOpen, onClose }) => {
           {/* 标签页内容 */}
           {activeTab === 'api' && <ApiSettingsTab onSaveComplete={showNotification} />}
           {activeTab === 'general' && <GeneralSettingsTab onSaveComplete={showNotification} />}
+          {activeTab === 'rag' && <RagKnowledgeBaseSettings onSaveComplete={showNotification} />}
           {activeTab === 'memory' && <MemorySettingsTab onSaveComplete={showNotification} />}
 
           <div className="modal-actions">

@@ -68,16 +68,20 @@ const chatSlice = createSlice({
     // 新增：每个模式的功能启用状态（工具功能已硬编码，只保留RAG检索）
     modeFeatureSettings: {
       general: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: [] // 新增：选择的RAG集合名称数组
       },
       outline: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: []
       },
       writing: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: []
       },
       adjustment: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: []
       }
     },
     // 新增：上下文限制设置
@@ -327,8 +331,16 @@ const chatSlice = createSlice({
       const { mode } = action.payload;
       if (state.modeFeatureSettings[mode]) {
         state.modeFeatureSettings[mode] = {
-          ragRetrievalEnabled: false
+          ragRetrievalEnabled: false,
+          ragCollectionNames: []
         };
+      }
+    },
+    // 新增：设置特定模式的RAG集合选择
+    setRagCollectionNames: (state, action) => {
+      const { mode, collectionNames } = action.payload;
+      if (state.modeFeatureSettings[mode]) {
+        state.modeFeatureSettings[mode].ragCollectionNames = collectionNames;
       }
     },
     // 新增：设置上下文限制设置
@@ -696,6 +708,7 @@ export const {
   setModeFeatureSetting, // 新增：导出 setModeFeatureSetting
   resetModeFeatureSettings, // 新增：导出 resetModeFeatureSettings
   setContextLimitSettings, // 新增：导出 setContextLimitSettings
+  setRagCollectionNames, // 新增：导出 setRagCollectionNames
   setAdditionalInfoForMode, // 新增：导出 setAdditionalInfoForMode
   setAdditionalInfoFieldForMode, // 新增：导出 setAdditionalInfoFieldForMode
   resetAdditionalInfoForMode, // 新增：导出 resetAdditionalInfoForMode

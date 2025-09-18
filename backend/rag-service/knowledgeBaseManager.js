@@ -221,6 +221,18 @@ class KnowledgeBaseManager {
         }
         return await this.collectionManager.deleteCollection(filename);
     }
+
+    /**
+     * 重命名知识库文件（修改显示名称）
+     * @param {string} oldFilename 原文件名
+     * @param {string} newFilename 新文件名
+     */
+    async renameFile(oldFilename, newFilename) {
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+        return await this.collectionManager.renameCollection(oldFilename, newFilename);
+    }
 }
 
 // 导出单例

@@ -222,8 +222,23 @@ async function* chatWithAI(messages, modelId, customSystemPrompt, mode = 'genera
        
        // RAG检索控制：只有在启用时才执行检索
        if (lastUserMessage && lastUserMessage.content && ragRetrievalEnabled) {
-           // 使用增强的检索功能，启用意图分析，并传递当前模式
-           const retrievalResult = await retriever.retrieve(messages, 3, true, mode);
+           // 获取当前模式的RAG集合选择设置
+           let ragCollectionNames = [];
+           try {
+               const StoreModule = await import('electron-store');
+               const Store = StoreModule.default;
+               const storeInstance = new Store();
+               const modeFeatureSettings = storeInstance.get('modeFeatureSettings') || {};
+               const currentModeSettings = modeFeatureSettings[mode] || {};
+               ragCollectionNames = currentModeSettings.ragCollectionNames || [];
+               
+               console.log(`[SimpleChatService] RAG集合选择设置 - 模式: ${mode}, 选择的集合:`, ragCollectionNames);
+           } catch (error) {
+               console.warn('[SimpleChatService] 获取RAG集合设置失败，使用所有集合:', error.message);
+           }
+           
+           // 使用增强的检索功能，启用意图分析，并传递当前模式和选择的集合
+           const retrievalResult = await retriever.retrieve(messages, 3, true, mode, ragCollectionNames);
             
             if (retrievalResult.documents && retrievalResult.documents.length > 0) {
                 retrievalInfo = retrievalResult;

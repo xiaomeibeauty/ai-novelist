@@ -347,6 +347,150 @@
   }
 }
 
+/* RAG知识库设置样式 */
+.rag-settings-sections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 25px;
+  margin-bottom: 30px;
+}
+
+.rag-settings-section {
+  background-color: #2a2a2a;
+  border-radius: 8px;
+  padding: 20px;
+  border: 1px solid #444;
+}
+
+.rag-settings-section h3 {
+  margin-top: 0;
+  color: #fff;
+  border-bottom: 2px solid #555;
+  padding-bottom: 12px;
+  font-size: 18px;
+  margin-bottom: 20px;
+}
+
+.rag-toggle {
+  margin-bottom: 15px;
+}
+
+.rag-toggle label {
+  font-size: 14px;
+  color: #ddd;
+  cursor: pointer;
+  margin-left: 8px;
+}
+
+.rag-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.collection-selection h4 {
+  margin: 15px 0 8px 0;
+  color: #ddd;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.collection-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+.collection-item {
+  margin-bottom: 8px;
+  padding: 8px;
+  background-color: #1e1e1e;
+  border-radius: 4px;
+  border: 1px solid #555;
+}
+
+.collection-item label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.collection-item input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+.collection-info {
+  display: flex;
+  flex-direction: column;
+  margin-left: 8px;
+}
+
+.collection-info strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.collection-details {
+  color: #888;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.collection-help {
+  background-color: #2d2d30;
+  padding: 10px;
+  border-radius: 4px;
+  border-left: 3px solid #2196F3;
+}
+
+.collection-help p {
+  margin: 4px 0;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.rag-settings-header {
+  margin-bottom: 20px;
+}
+
+.refresh-button {
+  background-color: #555;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.refresh-button:hover:not(:disabled) {
+  background-color: #666;
+}
+
+.refresh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.no-collections {
+  text-align: center;
+  padding: 40px;
+  color: #888;
+  background-color: #2a2a2a;
+  border-radius: 8px;
+  border: 1px solid #444;
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #ffcdd2;
+}
+
 /* 持久记忆编辑器样式 */
 .memory-editor h4 {
   margin: 0 0 15px 0;

@@ -11,6 +11,7 @@ import useIpcRenderer from './hooks/useIpcRenderer';
 import {
   setCustomPromptForMode,
   setModeFeatureSetting,
+  setRagCollectionNames,
   setAdditionalInfoForMode,
   setSelectedModel,
   setSelectedProvider,
@@ -75,6 +76,9 @@ function App() {
           Object.entries(storedModeFeatureSettings).forEach(([mode, settings]) => {
             if (settings.ragRetrievalEnabled !== undefined) {
               dispatch(setModeFeatureSetting({ mode, feature: 'ragRetrievalEnabled', enabled: settings.ragRetrievalEnabled }));
+            }
+            if (settings.ragCollectionNames !== undefined) {
+              dispatch(setRagCollectionNames({ mode, collectionNames: settings.ragCollectionNames }));
             }
           });
         }

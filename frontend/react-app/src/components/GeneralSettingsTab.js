@@ -148,6 +148,7 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
     }));
   };
 
+  // 功能设置变更处理（现在主要用于其他功能，RAG设置已移到专门页面）
   const handleFeatureSettingChange = (mode, feature, enabled) => {
     setLocalFeatureSettings(prev => ({
       ...prev,
@@ -175,9 +176,7 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
     }));
     setLocalFeatureSettings(prev => ({
       ...prev,
-      [mode]: {
-        ragRetrievalEnabled: false
-      }
+      [mode]: {}
     }));
     setLocalAdditionalInfo(prev => ({
       ...prev,
@@ -204,12 +203,12 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
         console.log(`[GeneralSettingsTab] 保存模式 ${mode} 的自定义提示词: ${localPrompts[mode] ? '有内容' : '空'}`);
       }
       
-      // 保存所有模式的功能设置
+      // 保存所有模式的功能设置（现在只保存其他功能设置，RAG设置已移到专门页面）
       for (const mode of Object.keys(localFeatureSettings)) {
         const settings = localFeatureSettings[mode];
-        console.log(`[GeneralSettingsTab] 保存模式 ${mode} 的功能设置: ragRetrievalEnabled=${settings.ragRetrievalEnabled}`);
+        console.log(`[GeneralSettingsTab] 保存模式 ${mode} 的功能设置:`, settings);
         
-        dispatch(setModeFeatureSetting({ mode, feature: 'ragRetrievalEnabled', enabled: settings.ragRetrievalEnabled }));
+        // 这里可以保存其他功能设置，RAG设置现在在专门页面处理
       }
       
       // 保存所有模式的附加信息
@@ -293,8 +292,7 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
                 <button
                   className="reset-button"
                   onClick={() => handleReset(mode)}
-                  disabled={!localPrompts[mode] &&
-                           !localFeatureSettings[mode]?.ragRetrievalEnabled}
+                  disabled={!localPrompts[mode]}
                 >
                   <FontAwesomeIcon icon={faUndo} /> 重置
                 </button>
@@ -320,18 +318,6 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
                   </div>
                 )}
 
-                <div className="feature-toggle">
-                  <input
-                    type="checkbox"
-                    id={`${mode}-rag`}
-                    checked={localFeatureSettings[mode]?.ragRetrievalEnabled || false}
-                    onChange={(e) => handleFeatureSettingChange(mode, 'ragRetrievalEnabled', e.target.checked)}
-                  />
-                  <label htmlFor={`${mode}-rag`}>启用RAG检索</label>
-                </div>
-                <div className="feature-description">
-                  在此模式下允许AI使用知识库检索功能获取相关信息
-                </div>
 
                 {/* 单个模式的上下文设置 */}
                 <ModeContextSettings mode={mode} modeName={getModeDisplayName(mode)} />
