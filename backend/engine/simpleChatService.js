@@ -26,6 +26,7 @@ const getNovelPath = () => {
 // 服务级别的状态，用于存储持久化设置
 const serviceState = {
     isStreaming: true, // 默认为流式
+    abortController: null, // 新增：用于中止请求的控制器
 };
 
 function setStreamingMode({ stream }) {
@@ -36,6 +37,20 @@ function setStreamingMode({ stream }) {
 // 新增 getter 函数以安全地暴露状态
 function getStreamingMode() {
     return serviceState.isStreaming;
+}
+
+// 新增：设置中止控制器
+function setAbortController(controller) {
+    serviceState.abortController = controller;
+}
+
+// 新增：中止当前请求
+function abortCurrentRequest() {
+    if (serviceState.abortController) {
+        serviceState.abortController.abort();
+        console.log('[SimpleChatService] 已中止当前请求');
+        serviceState.abortController = null;
+    }
 }
 
 let aiResponseSendCount = 0;
@@ -335,10 +350,28 @@ ${retrievalResult.documents.map(doc => `- ${doc}`).join('\n')}\n`;
        const sanitizedMessages = sanitizeMessagesForAI(messagesToSend);
        console.log('[SimpleChatService] 消息清理完成，移除非标准字段');
 
-       const aiResponse = await adapter.generateCompletion(sanitizedMessages, {
-            model: modelId,
-            stream: serviceState.isStreaming // 使用服务级别状态
-        });
+       // 完整的请求参数（服务层显示完整参数，但让适配器处理实际值）
+       const requestOptions = {
+           model: modelId,
+           stream: serviceState.isStreaming, // 使用服务级别状态
+           temperature: 0.7,
+           top_p: 0.7,
+           n: 1,
+           enable_thinking: false,
+           thinking_budget: 4096
+       };
+       
+       // 打印完整的请求参数（服务层显示）
+       console.log('[SimpleChatService] 服务层请求参数:', JSON.stringify(requestOptions, null, 2));
+       
+       // 实际传递给适配器的参数（让适配器处理默认值）
+       const adapterOptions = {
+           model: modelId,
+           stream: serviceState.isStreaming
+           // 其他参数由适配器处理默认值
+       };
+       
+       const aiResponse = await adapter.generateCompletion(sanitizedMessages, adapterOptions);
 
         let fullAssistantContent = "";
         let finalReasoningContent = "";
@@ -455,8 +488,21 @@ async function processUserMessage(message, sessionId, currentMessages, mode, cus
     );
 
     try {
+        // 创建AbortController用于停止功能
+        const abortController = new AbortController();
+        setAbortController(abortController);
+        
+        // 通知前端开始流式传输
+        _sendAiResponseToFrontend('streaming_started', { sessionId: sessionId });
+        
         const stream = chatWithAI(validHistory, defaultModelId, customPrompt, mode, ragRetrievalEnabled);
         for await (const chunk of stream) {
+            // 检查是否被中止
+            if (abortController.signal.aborted) {
+                console.log('[SimpleChatService] 请求已被中止，停止处理流式响应');
+                break;
+            }
+            
             if (chunk.type === 'text') {
                 if (getStreamingMode()) {
                     _sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: sessionId });
@@ -465,12 +511,21 @@ async function processUserMessage(message, sessionId, currentMessages, mode, cus
                 }
             }
         }
-        if (getStreamingMode()) {
+        if (getStreamingMode() && !abortController.signal.aborted) {
             _sendAiResponseToFrontend('text_stream_end', null);
         }
+        
+        // 通知前端流式传输已结束
+        _sendAiResponseToFrontend('streaming_ended', { sessionId: sessionId });
+        
+        // 清理AbortController
+        setAbortController(null);
+        
     } catch (error) {
         console.error('调用聊天服务失败:', error);
         _sendAiResponseToFrontend('error', `调用聊天服务失败: ${error.message}`);
+        // 清理AbortController
+        setAbortController(null);
     }
 }
 
@@ -481,4 +536,6 @@ module.exports = {
     setStreamingMode,
     getStreamingMode,
     processUserMessage,
+    abortCurrentRequest, // 新增：导出停止功能
+    setAbortController, // 新增：导出设置中止控制器
 }

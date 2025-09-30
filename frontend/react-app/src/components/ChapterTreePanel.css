@@ -368,3 +368,69 @@
     border-color: var(--primary-color); /* 悬停时边框变为绿色 */
     color: var(--primary-color); /* 悬停时文字变为绿色 */
 }
+/* 前缀相关样式 */
+.prefix-section {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+  min-width: 30px;
+}
+
+.prefix-display {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: 1px solid transparent;
+}
+
+.prefix-display:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.prefix-edit-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.prefix-edit-input {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: inherit;
+  padding: 2px 4px;
+  font-size: 0.8em;
+  width: 40px;
+  text-align: center;
+}
+
+.prefix-edit-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.prefix-edit-confirm,
+.prefix-edit-cancel {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 2px;
+  font-size: 0.7em;
+  transition: background-color 0.2s;
+}
+
+.prefix-edit-confirm:hover {
+  background: rgba(76, 175, 80, 0.3);
+}
+
+.prefix-edit-cancel:hover {
+  background: rgba(244, 67, 54, 0.3);
+}

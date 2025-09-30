@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   setAdditionalInfoForMode,
   resetAdditionalInfoForMode,
-  setAdditionalInfoForAllModes
+  setAdditionalInfoForAllModes,
+  setShowRagSettingsModal
 } from '../store/slices/chatSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSave } from '@fortawesome/free-solid-svg-icons';
 import useIpcRenderer from '../hooks/useIpcRenderer';
 import FileSearch from './FileSearch';
 
-const MemorySettingsTab = ({ onSaveComplete }) => {
+const MemorySettingsTab = forwardRef(({ onSaveComplete }, ref) => {
   const dispatch = useDispatch();
   const { invoke } = useIpcRenderer();
   const { additionalInfo } = useSelector((state) => state.chat);
@@ -128,10 +129,13 @@ const MemorySettingsTab = ({ onSaveComplete }) => {
     return names[mode] || mode;
   };
 
+  // 暴露保存方法给父组件
+  useImperativeHandle(ref, () => ({
+    handleSave
+  }));
+
   return (
     <div className="tab-content">
-      <h3>持久记忆设置</h3>
-      
       {/* 模式选择器 */}
       <div className="mode-selector" style={{ marginBottom: '20px' }}>
         <h4 style={{ margin: '0 0 8px 0', color: '#ddd', fontSize: '16px' }}>选择模式:</h4>
@@ -211,18 +215,8 @@ const MemorySettingsTab = ({ onSaveComplete }) => {
         </div>
       </div>
 
-      <div className="modal-actions" style={{ marginTop: '20px' }}>
-        {isLoadingFile && (
-          <div style={{ color: '#569cd6', marginBottom: '10px', fontSize: '14px' }}>
-            正在加载文件内容...
-          </div>
-        )}
-        <button className="save-button" onClick={handleSave}>
-          保存
-        </button>
-      </div>
     </div>
   );
-};
+});
 
 export default MemorySettingsTab;

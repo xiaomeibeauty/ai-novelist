@@ -19,7 +19,8 @@ import {
   setOpenrouterApiKey,
   setAliyunEmbeddingApiKey,
   setIntentAnalysisModel,
-  setEnableStream
+  setEnableStream,
+  setContextLimitSettings
 } from './store/slices/chatSlice';
 
 function App() {
@@ -34,7 +35,6 @@ function App() {
     const loadAppSettings = async () => {
       try {
         console.log('[App] 开始从存储加载设置...');
-        
         // 从存储获取所有设置
         const [
           storedCustomPrompts,
@@ -46,7 +46,8 @@ function App() {
           storedOpenrouterApiKey,
           storedAliyunEmbeddingApiKey,
           storedIntentAnalysisModel,
-          storedEnableStream
+          storedEnableStream,
+          storedContextLimitSettings
         ] = await Promise.all([
           getStoreValue('customPrompts'),
           getStoreValue('modeFeatureSettings'),
@@ -57,7 +58,8 @@ function App() {
           getStoreValue('openrouterApiKey'),
           getStoreValue('aliyunEmbeddingApiKey'),
           getStoreValue('intentAnalysisModel'),
-          getStoreValue('enableStream')
+          getStoreValue('enableStream'),
+          getStoreValue('contextLimitSettings')
         ]);
 
         console.log('[App] 从存储获取的设置:');
@@ -97,6 +99,14 @@ function App() {
         if (storedAliyunEmbeddingApiKey) dispatch(setAliyunEmbeddingApiKey(storedAliyunEmbeddingApiKey));
         if (storedIntentAnalysisModel) dispatch(setIntentAnalysisModel(storedIntentAnalysisModel));
         if (storedEnableStream !== undefined) dispatch(setEnableStream(storedEnableStream !== false));
+        
+        // 加载上下文限制设置
+        if (storedContextLimitSettings) {
+          dispatch(setContextLimitSettings(storedContextLimitSettings));
+          console.log('[App] 上下文限制设置已加载:', storedContextLimitSettings);
+        } else {
+          console.log('[App] 未找到保存的上下文限制设置，使用默认值');
+        }
 
         console.log('[App] 设置加载完成');
       } catch (error) {

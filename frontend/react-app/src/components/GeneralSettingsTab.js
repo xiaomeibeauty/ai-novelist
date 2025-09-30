@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   setCustomPromptForMode,
@@ -7,14 +7,15 @@ import {
   resetModeFeatureSettings,
   setAdditionalInfoForMode,
   resetAdditionalInfoForMode,
-  setContextLimitSettings
+  setContextLimitSettings,
+  setShowGeneralSettingsModal
 } from '../store/slices/chatSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUndo, faSave } from '@fortawesome/free-solid-svg-icons';
 import useIpcRenderer from '../hooks/useIpcRenderer';
 import ModeContextSettings from './ModeContextSettings';
 
-const GeneralSettingsTab = ({ onSaveComplete }) => {
+const GeneralSettingsTab = forwardRef(({ onSaveComplete }, ref) => {
   const dispatch = useDispatch();
   const { invoke, getStoreValue } = useIpcRenderer();
   const { customPrompts, modeFeatureSettings, additionalInfo } = useSelector((state) => state.chat);
@@ -253,10 +254,13 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
     return names[mode] || mode;
   };
 
+  // 暴露保存方法给父组件
+  useImperativeHandle(ref, () => ({
+    handleSave
+  }));
+
   return (
     <div className="tab-content">
-      <h3>通用设置</h3>
-      
       {isLoadingPrompts ? (
         <div className="loading-prompts">
           <p>正在加载默认提示词...</p>
@@ -328,13 +332,8 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
       )}
 
 
-      <div className="modal-actions" style={{ marginTop: '20px' }}>
-        <button className="save-button" onClick={handleSave}>
-          保存
-        </button>
-      </div>
     </div>
   );
-};
+});
 
 export default GeneralSettingsTab;

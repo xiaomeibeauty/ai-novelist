@@ -418,15 +418,20 @@ app.whenReady().then(async () => {
     await initializeServices();
     console.log('[main] Services initialized successfully');
 
-    // 启动 ChromaDB 服务器
-    console.log('[main] 正在启动 ChromaDB 服务器...');
-    try {
-        await startChromaServer();
-        console.log('[main] ChromaDB 服务器启动成功');
-    } catch (error) {
-        console.error('[main] ChromaDB 服务器启动失败:', error);
-        // 即使服务器启动失败，也继续运行应用，但禁用 RAG 功能
-        console.warn('[main] RAG 功能将不可用');
+    // 启动 ChromaDB 服务器（仅在未禁用时启动）
+    if (!process.env.CHROMA_DISABLED) {
+        console.log('[main] 正在启动 ChromaDB 服务器...');
+        try {
+            await startChromaServer();
+            console.log('[main] ChromaDB 服务器启动成功');
+        } catch (error) {
+            console.error('[main] ChromaDB 服务器启动失败:', error);
+            // 即使服务器启动失败，也继续运行应用，但禁用 RAG 功能
+            console.warn('[main] RAG 功能将不可用');
+        }
+    } else {
+        console.log('[main] ChromaDB 自动启动已禁用 (CHROMA_DISABLED=true)');
+        console.log('[main] RAG 功能将不可用，如需使用请手动启动ChromaDB服务器');
     }
 
     createWindow();

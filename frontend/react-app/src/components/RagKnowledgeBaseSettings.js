@@ -1,22 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { 
+import {
   setModeFeatureSetting,
-  setRagCollectionNames
+  setRagCollectionNames,
+  setAliyunEmbeddingApiKey,
+  setIntentAnalysisModel,
+  setAvailableModels,
+  setShowRagSettingsModal
 } from '../store/slices/chatSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBook, faCheckSquare, faSquare, faSync } from '@fortawesome/free-solid-svg-icons';
 import useIpcRenderer from '../hooks/useIpcRenderer';
 
-const RagKnowledgeBaseSettings = ({ onSaveComplete }) => {
+const RagKnowledgeBaseSettings = forwardRef(({ onSaveComplete }, ref) => {
   const dispatch = useDispatch();
-  const { invoke } = useIpcRenderer();
-  const { modeFeatureSettings } = useSelector((state) => state.chat);
+  const { invoke, setStoreValue } = useIpcRenderer();
+  const {
+    modeFeatureSettings,
+    aliyunEmbeddingApiKey,
+    intentAnalysisModel,
+    availableModels
+  } = useSelector((state) => state.chat);
   
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [localSettings, setLocalSettings] = useState({});
+  const [localAliyunKey, setLocalAliyunKey] = useState('');
+  const [localIntentModel, setLocalIntentModel] = useState('');
 
   // 从后端获取所有集合列表
   const fetchCollections = async () => {
@@ -37,12 +48,35 @@ const RagKnowledgeBaseSettings = ({ onSaveComplete }) => {
     }
   };
 
+  // 加载RAG相关设置
+  const loadRagSettings = useCallback(async () => {
+    try {
+      // 从存储加载阿里云API Key和意图分析模型
+      const [storedAliyunKey, storedIntentModel] = await Promise.all([
+        invoke('get-store-value', 'aliyunEmbeddingApiKey'),
+        invoke('get-store-value', 'intentAnalysisModel')
+      ]);
+      
+      setLocalAliyunKey(storedAliyunKey || '');
+      setLocalIntentModel(storedIntentModel || '');
+      
+      // 加载可用模型列表
+      const models = await invoke('get-available-models');
+      if (models.success) {
+        dispatch(setAvailableModels(models.models));
+      }
+    } catch (error) {
+      console.error('加载RAG设置失败:', error);
+    }
+  }, [invoke, dispatch]);
+
   // 初始化加载设置和集合列表
   useEffect(() => {
     // 从Redux状态初始化本地设置
     setLocalSettings(modeFeatureSettings);
     fetchCollections();
-  }, [modeFeatureSettings]);
+    loadRagSettings();
+  }, [modeFeatureSettings, loadRagSettings]);
 
   // 处理集合选择变化
   const handleCollectionChange = (mode, collectionName, checked) => {
@@ -79,6 +113,12 @@ const RagKnowledgeBaseSettings = ({ onSaveComplete }) => {
     }));
   };
 
+  // 处理外部链接点击
+  const handleExternalLinkClick = (url, e) => {
+    e.preventDefault();
+    invoke('open-external', url);
+  };
+
   // 保存设置
   const handleSave = async () => {
     try {
@@ -87,22 +127,33 @@ const RagKnowledgeBaseSettings = ({ onSaveComplete }) => {
         const settings = localSettings[mode];
         if (settings) {
           // 保存RAG检索启用状态
-          dispatch(setModeFeatureSetting({ 
-            mode, 
-            feature: 'ragRetrievalEnabled', 
-            enabled: settings.ragRetrievalEnabled || false 
+          dispatch(setModeFeatureSetting({
+            mode,
+            feature: 'ragRetrievalEnabled',
+            enabled: settings.ragRetrievalEnabled || false
           }));
           
           // 保存集合选择
-          dispatch(setRagCollectionNames({ 
-            mode, 
-            collectionNames: settings.ragCollectionNames || [] 
+          dispatch(setRagCollectionNames({
+            mode,
+            collectionNames: settings.ragCollectionNames || []
           }));
         }
       }
       
+      // 保存RAG模型设置
+      dispatch(setAliyunEmbeddingApiKey(localAliyunKey));
+      dispatch(setIntentAnalysisModel(localIntentModel));
+      
       // 保存到持久化存储
-      await invoke('set-store-value', 'modeFeatureSettings', localSettings);
+      await Promise.all([
+        invoke('set-store-value', 'modeFeatureSettings', localSettings),
+        setStoreValue('aliyunEmbeddingApiKey', localAliyunKey),
+        setStoreValue('intentAnalysisModel', localIntentModel)
+      ]);
+      
+      // 重新初始化阿里云嵌入函数
+      await invoke('reinitialize-aliyun-embedding');
       
       if (onSaveComplete) {
         onSaveComplete('RAG知识库设置保存成功！', true);
@@ -129,17 +180,58 @@ const RagKnowledgeBaseSettings = ({ onSaveComplete }) => {
     return localSettings[mode]?.ragCollectionNames?.includes(collectionName) || false;
   };
 
+  // 暴露保存方法给父组件
+  useImperativeHandle(ref, () => ({
+    handleSave
+  }));
+
   return (
     <div className="tab-content">
-      <h3>RAG知识库设置</h3>
-      
+      {/* RAG模型配置部分 */}
+      <div className="settings-section">
+        <h4>RAG模型配置</h4>
+        
+        <div className="setting-item">
+          <label htmlFor="aliyunEmbeddingApiKey">阿里云嵌入API Key:</label>
+          <input
+            type="password"
+            id="aliyunEmbeddingApiKey"
+            value={localAliyunKey || ''}
+            onChange={(e) => setLocalAliyunKey(e.target.value)}
+            placeholder="请输入您的阿里云嵌入API Key"
+          />
+          <div className="setting-description">
+            用于RAG功能的文本嵌入模型，获取地址：<a href="https://www.aliyun.com/product/bailian" onClick={(e) => handleExternalLinkClick('https://www.aliyun.com/product/bailian', e)} style={{cursor: 'pointer', color: '#007acc', textDecoration: 'underline'}}>阿里云百炼</a>
+          </div>
+        </div>
+
+        <div className="setting-item">
+          <label htmlFor="intentAnalysisModel">意图分析模型:</label>
+          <select
+            id="intentAnalysisModel"
+            value={localIntentModel || ''}
+            onChange={(e) => setLocalIntentModel(e.target.value)}
+          >
+            <option value="">使用默认模型（自动选择）</option>
+            {availableModels.map(model => (
+              <option key={model.id} value={model.id}>
+                {model.name} ({model.provider})
+              </option>
+            ))}
+          </select>
+          <div className="setting-description">
+            用于分析写作意图和生成检索词的AI模型
+          </div>
+        </div>
+      </div>
+
       <div className="rag-settings-header">
-        <button 
+        <button
           className="refresh-button"
           onClick={fetchCollections}
           disabled={loading}
         >
-          <FontAwesomeIcon icon={faSync} spin={loading} /> 
+          <FontAwesomeIcon icon={faSync} spin={loading} />
           {loading ? '加载中...' : '刷新集合列表'}
         </button>
       </div>
@@ -215,13 +307,8 @@ const RagKnowledgeBaseSettings = ({ onSaveComplete }) => {
         </div>
       )}
 
-      <div className="modal-actions" style={{ marginTop: '20px' }}>
-        <button className="save-button" onClick={handleSave}>
-          保存
-        </button>
-      </div>
     </div>
   );
-};
+});
 
 export default RagKnowledgeBaseSettings;

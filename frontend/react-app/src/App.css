@@ -29,14 +29,14 @@
   --border-radius-medium: 8px;
 }
 
-/* 文本选中变色：从蓝色过渡到紫色 */
+/* 文本选中变色：改为绿色高亮 */
 ::selection {
-  background: rgba(74, 74, 74, 0.6); /* 改为深灰色半透明 */
+  background: rgba(0, 173, 98, 0.6); /* 使用主题绿色，60%透明度 */
   color: white;
 }
 /* 兼容Firefox */
 ::-moz-selection {
-  background: rgba(74, 74, 74, 0.6); /* 改为深灰色半透明 */
+  background: rgba(0, 173, 98, 0.6); /* 使用主题绿色，60%透明度 */
   color: white;
 }
 
@@ -57,7 +57,7 @@
   overflow: hidden; /* 防止内容溢出 PanelGroup */
 }
 
-.left-panel, .middle-panel, .right-panel {
+.sidebar-panel-fixed, .left-panel, .middle-panel, .right-panel {
   display: flex;
   flex-direction: column;
   /* 移除 padding，让内部内容负责自己的 padding */
@@ -65,6 +65,22 @@
   border-radius: var(--border-radius-medium);
   box-shadow: var(--shadow-light);
   position: relative; /* 使内部的绝对定位按钮生效 */
+}
+
+/* 固定侧边栏样式 */
+.sidebar-panel-fixed {
+  background-color: var(--panel-bg-color-alt);
+  padding: 0;
+  width: 50px; /* 固定宽度 */
+  flex-shrink: 0; /* 防止被压缩 */
+  overflow: hidden; /* 防止内容溢出 */
+}
+
+/* 细长的普通灰色分隔线 */
+.divider-line {
+  width: 1px;
+  background-color: var(--divider-color);
+  flex-shrink: 0; /* 防止被压缩 */
 }
 
 .left-panel {
@@ -75,6 +91,15 @@
 .middle-panel {
   background-color: var(--panel-bg-color);
   padding: 15px; /* 保持 middle-panel 的 padding */
+}
+
+/* 编辑器内容包装器，确保标签页始终可见 */
+.editor-content-wrapper {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* 防止内容溢出 */
+  min-height: 0; /* 修复 flex 子元素溢出问题 */
 }
 
 .right-panel {

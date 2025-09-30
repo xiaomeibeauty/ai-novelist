@@ -8,19 +8,22 @@ import DiffViewer from './DiffViewer'; // 引入 DiffViewer
 import ContextMenu from './ContextMenu'; // 引入 ContextMenu
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faSave, faExchangeAlt } from '@fortawesome/free-solid-svg-icons'; // 添加图标
+import { faPlus, faExchangeAlt } from '@fortawesome/free-solid-svg-icons'; // 移除保存图标
 
 import './EditorPanel.css';
 import NotificationModal from './NotificationModal';
-import backgroundImage from '../assets/背景.png'; // 导入背景图片
+import BackgroundImage from './BackgroundImage'; // 导入新的背景图组件
  
 import useIpcRenderer from '../hooks/useIpcRenderer';
 import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tiptap-helpers.js';
  
- function EditorPanel() {
+ function EditorPanel({ splitViewTabId = null }) {
   const dispatch = useDispatch();
-  const { openTabs, activeTabId } = useSelector((state) => state.novel);
-  const activeTab = openTabs.find(tab => tab.id === activeTabId);
+  const { openTabs, activeTabId, splitView } = useSelector((state) => state.novel);
+  
+  // 在分屏模式下，使用传入的tabId，否则使用activeTabId
+  const displayTabId = splitViewTabId || activeTabId;
+  const activeTab = openTabs.find(tab => tab.id === displayTabId);
 
   const editorRef = useRef(null);
   const TiptapEditorInstance = useRef(null);
@@ -32,25 +35,36 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
   const [modalMessage, setModalMessage] = useState('');
   const [paragraphs, setParagraphs] = useState([]);
   const lineNumbersRef = useRef(null);
+  const [characterCount, setCharacterCount] = useState(0);
+  const [lastSavedTime, setLastSavedTime] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const autoSaveTimerRef = useRef(null);
+  const pendingSaveRef = useRef(false);
  
-  // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
-  // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
-  // 保存文件内容的函数 (现在不接受参数，直接从组件状态中获取)
+  // 自动保存文件内容的函数
   const saveContent = useCallback(
     async (isManualSave = false) => {
-      if (!activeTab) {
-        console.warn('无法保存：没有激活的标签页。');
-        return { success: false, error: '没有激活的标签页。' };
+      if (!activeTab || !activeTab.isDirty) {
+        console.log('[AutoSave] 无需保存：没有激活的标签页或内容未修改。');
+        return { success: true };
       }
 
       const { id: filePath, content } = activeTab;
 
-      console.log('[EditorPanel] saveContent: 尝试保存文件，filePath:', filePath);
+      console.log('[AutoSave] 尝试保存文件，filePath:', filePath);
 
       if (!filePath) {
         console.warn('无法保存文件：文件路径无效。', filePath);
         return { success: false, error: '文件路径无效。' };
       }
+
+      // 防止重复保存
+      if (isSaving) {
+        console.log('[AutoSave] 正在保存中，跳过重复请求');
+        return { success: true };
+      }
+
+      setIsSaving(true);
 
       try {
         const result = await invoke('save-novel-content', filePath, content);
@@ -62,10 +76,11 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
           }
           return { success: false, error: result.error };
         } else {
-          console.log('文件保存成功！');
+          console.log('[AutoSave] 文件保存成功！');
           // 保存成功后，更新状态
           dispatch(updateTabContent({ tabId: filePath, content, isDirty: false }));
           initialContentRef.current = content; // 更新 initialContent
+          setLastSavedTime(new Date());
           if (window.electron) {
             window.electron.setUnsavedChanges(false);
           }
@@ -82,9 +97,12 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
            setShowModal(true);
         }
         return { success: false, error: error.message };
+      } finally {
+        setIsSaving(false);
+        pendingSaveRef.current = false;
       }
     },
-    [invoke, activeTab, dispatch]
+    [invoke, activeTab, dispatch, isSaving]
   );
  
   // 使用 useRef 存储 saveContent 的最新引用
@@ -92,6 +110,41 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
   useEffect(() => {
     saveContentRef.current = saveContent;
   }, [saveContent]);
+
+  // 自动保存定时器
+  useEffect(() => {
+    if (!activeTab || !activeTab.isDirty) {
+      return;
+    }
+
+    // 清除之前的定时器
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    // 设置新的自动保存定时器（3秒后保存）
+    autoSaveTimerRef.current = setTimeout(() => {
+      if (activeTab && activeTab.isDirty && !isSaving) {
+        console.log('[AutoSave] 触发自动保存');
+        saveContentRef.current(false);
+      }
+    }, 3000);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [activeTab?.id, activeTab?.isDirty, isSaving]);
+
+  // 组件卸载时清理定时器
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   // 使用标准IPC监听保存并退出请求
   useEffect(() => {
@@ -140,10 +193,7 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
     };
   }, []); // 依赖项为空数组，确保只注册一次
 
-  // 修改 handleSaveButtonClick 调用 saveContent 时传入 true
-  const handleSaveButtonClick = useCallback(() => {
-    saveContent(true); // 传入 true 表示手动保存
-  }, [saveContent]);
+  // 移除手动保存按钮点击处理函数
 
 
   const handleCloseTab = useCallback(() => {
@@ -168,6 +218,13 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
     });
   }, []);
 
+  // 计算字符数的函数
+  const calculateCharacterCount = useCallback((content) => {
+    if (!content) return 0;
+    // 去除所有空白字符（包括空格、换行、制表符等）后计算字符数
+    return content.replace(/\s/g, '').length;
+  }, []);
+
   const handleEditorChange = useCallback(({ editor }) => {
     if (!activeTab) return;
 
@@ -177,13 +234,16 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
     // 派发 action 更新 tab 内容和 isDirty 状态
     dispatch(updateTabContent({ tabId: activeTab.id, content: newContent }));
 
+    // 更新字符计数
+    setCharacterCount(calculateCharacterCount(newContent));
+
     const changed = newContent !== initialContentRef.current;
     if (window.electron) {
         window.electron.setUnsavedChanges(changed);
     }
 
     updateParagraphs();
-  }, [dispatch, activeTab?.id, updateParagraphs]); // 依赖于 activeTab.id 而不是整个对象
+  }, [dispatch, activeTab?.id, updateParagraphs, calculateCharacterCount]); // 依赖于 activeTab.id 而不是整个对象
  
   const handleEditorClick = useCallback((e) => {
     const editor = TiptapEditorInstance.current;
@@ -256,10 +316,12 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
         // Attempt to restore selection
         TiptapEditorInstance.current.commands.setTextSelection({ from, to });
         initialContentRef.current = activeTab.content;
+        // 更新字符计数
+        setCharacterCount(calculateCharacterCount(activeTab.content));
         setTimeout(updateParagraphs, 50);
       }
     }
-  }, [activeTab?.content]); // Precise dependency
+  }, [activeTab?.content, calculateCharacterCount]); // Precise dependency
 
   // Effect for updating the 'isDirty' status in the main process
   useEffect(() => {
@@ -268,13 +330,16 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
     }
   }, [activeTab?.isDirty]);
 
+  // 初始化字符计数
   useEffect(() => {
     if (activeTab) {
       setTitle(activeTab.title);
+      setCharacterCount(calculateCharacterCount(activeTab.content));
     } else {
       setTitle('未命名');
+      setCharacterCount(0);
     }
-  }, [activeTab?.id, activeTab?.title]); // Depend on specific properties
+  }, [activeTab?.id, activeTab?.title, activeTab?.content, calculateCharacterCount]); // Depend on specific properties
 
   const handleContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -354,18 +419,19 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
   }, [dispatch, title, activeTab?.id, activeTab?.title]); // Depend on specific properties
 
 
+  // 在分屏模式下，如果当前标签页不在分屏中，则不显示
+  const shouldShowInSplitView = splitView.enabled && splitViewTabId === null &&
+      displayTabId !== splitView.leftTabId && displayTabId !== splitView.rightTabId;
+  
+  if (splitView.enabled && shouldShowInSplitView) {
+    return null;
+  }
+
   return (
     <>
       {!activeTab ? (
-        <div
-          className="no-file-selected-panel"
-          style={{
-            backgroundImage: `url(${backgroundImage})`,
-            backgroundSize: '20% auto',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat'
-          }}
-        >
+        <div className="no-file-selected-panel">
+          <BackgroundImage />
         </div>
       ) : (
         <div className="editor-panel-content">
@@ -399,9 +465,18 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
                     }
                   }}
                 />
-                <button className="save-button" onClick={() => saveContent(true)}>
-                  <FontAwesomeIcon icon={faSave} />
-                </button>
+                {/* 自动保存状态显示 */}
+                <div className="auto-save-status">
+                  {isSaving ? (
+                    <span className="saving-indicator">保存中...</span>
+                  ) : lastSavedTime ? (
+                    <span className="saved-indicator">
+                      已保存 {lastSavedTime.toLocaleTimeString()}
+                    </span>
+                  ) : (
+                    <span className="unsaved-indicator">未保存</span>
+                  )}
+                </div>
                 {/* 临时的 Diff 触发按钮 */}
                 {activeTab.isDirty && <span className="unsaved-indicator">*</span>}
               </>
@@ -443,7 +518,13 @@ import { convertTiptapJsonToText, convertTextToTiptapJson } from '../utils/tipta
                       container.style.transform = `translateY(-${e.target.scrollTop}px)`;
                     }
                   }}
-                ></div>
+                />
+              </div>
+              {/* 字符统计显示 - 移动到编辑框外的右下角 */}
+              <div className="character-count-container">
+                <div className="character-count">
+                  总字符数: {characterCount}
+                </div>
               </div>
               {showContextMenu && (
                 <ContextMenu

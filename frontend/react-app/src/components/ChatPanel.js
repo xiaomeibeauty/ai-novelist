@@ -5,13 +5,15 @@ import {
   setQuestionCard,
   setMessages,
   setIsHistoryPanelVisible,
-  setIsDeleteMode,
   setDeepSeekHistory,
   setSelectedModel,
   setSelectedProvider, // 新增：导入设置选中提供商的action
-  setShowSettingsModal,
+  setShowApiSettingsModal,
+  setShowRagSettingsModal,
+  setShowGeneralSettingsModal,
   setDeepseekApiKey,
   setOpenrouterApiKey,
+  setSiliconflowApiKey, // 新增：导入设置硅基流动API Key的action
   setAliyunEmbeddingApiKey, // 新增：导入设置阿里云嵌入API Key的action
   setIntentAnalysisModel, // 新增：导入设置意图分析模型的action
   setAvailableModels,
@@ -32,6 +34,8 @@ import {
   setIsCreationModeEnabled, // 新增：导入设置创作模式启用状态的action
   setShowCreationModal, // 新增：导入设置创作模式弹窗显示状态的action
   setAdditionalInfoForAllModes, // 新增：导入批量设置附加信息的action
+  setStreamingState, // 新增：导入设置流式状态的action
+  stopStreaming, // 新增：导入停止流式传输的action
 } from '../store/slices/chatSlice';
 import { DEFAULT_SYSTEM_PROMPT } from '../store/slices/chatSlice'; // 导入默认系统提示词
 import { startDiff, acceptSuggestion, rejectSuggestion } from '../store/slices/novelSlice';
@@ -42,11 +46,14 @@ import NotificationModal from './NotificationModal';
 import ConfirmationModal from './ConfirmationModal';
 import CreationModeModal from './CreationModeModal';
 import PromptManagerModal from './PromptManagerModal'; // 新增：导入提示词管理模态框
-import UnifiedSettingsModal from './UnifiedSettingsModal'; // 新增：导入统一设置模态框
+import ApiSettingsModal from './ApiSettingsModal'; // 新增：导入API设置模态框
+import RagSettingsModal from './RagSettingsModal'; // 新增：导入RAG设置模态框
+import GeneralSettingsModal from './GeneralSettingsModal'; // 新增：导入通用设置模态框
 import KnowledgeBasePanel from './KnowledgeBasePanel'; // 新增：导入知识库面板
+import ModelSelectorPanel from './ModelSelectorPanel'; // 新增：导入模型选择面板
 import './ChatPanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil, faPlus, faWrench, faBook } from '@fortawesome/free-solid-svg-icons';
+import { faClock, faTrashCan, faPaperPlane, faGear, faSpinner, faBoxArchive, faCopy, faRedo, faPencil, faPlus, faWrench, faBook, faAngleLeft, faAngleRight, faStop } from '@fortawesome/free-solid-svg-icons';
 import CustomProviderSettings from './CustomProviderSettings'; // 新增
 
 // 新增：可重用的工具调用渲染组件
@@ -103,6 +110,133 @@ const getInsertContentPreview = (currentContent, { paragraph, content: textToIns
   return lines.join('\n');
 };
 
+// 模型选择器组件
+const ModelSelector = ({ selectedModel, availableModels, onModelChange, setStoreValue }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [page, setPage] = useState(0);
+  const modelsPerPage = 5;
+
+  // 过滤模型
+  const filteredModels = availableModels.filter(model =>
+    model.id.toLowerCase().includes(searchText.toLowerCase()) ||
+    model.provider.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  // 分页模型
+  const startIndex = page * modelsPerPage;
+  const paginatedModels = filteredModels.slice(startIndex, startIndex + modelsPerPage);
+  const totalPages = Math.ceil(filteredModels.length / modelsPerPage);
+
+  // 获取当前选中模型的显示名称
+  const getDisplayModelName = () => {
+    if (!selectedModel) return '';
+    const model = availableModels.find(m => m.id === selectedModel);
+    return model ? model.id : selectedModel;
+  };
+
+  const handleModelSelect = async (modelId) => {
+    onModelChange(modelId);
+    
+    // 保存到持久化存储
+    if (setStoreValue) {
+      try {
+        await setStoreValue('selectedModel', modelId);
+        console.log(`[模型选择器] 已保存模型选择: ${modelId}`);
+      } catch (error) {
+        console.error('[模型选择器] 保存模型选择失败:', error);
+      }
+    }
+    
+    setIsExpanded(false);
+    setSearchText('');
+    setPage(0);
+  };
+
+  // 处理搜索框点击事件，阻止事件冒泡
+  const handleSearchClick = (e) => {
+    e.stopPropagation();
+  };
+
+  // 处理搜索框输入变化
+  const handleSearchChange = (e) => {
+    setSearchText(e.target.value);
+    setPage(0);
+  };
+
+  return (
+    <div className="model-selector-container">
+      <div
+        className="model-selector-bar"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        {isExpanded ? (
+          <input
+            type="text"
+            placeholder={getDisplayModelName()}
+            value={searchText}
+            onChange={handleSearchChange}
+            onClick={handleSearchClick}
+            className="model-search-input-bar"
+            autoFocus
+          />
+        ) : (
+          <span className="selected-model-name">{getDisplayModelName()}</span>
+        )}
+        <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
+      </div>
+
+      {isExpanded && (
+        <div className="model-selector-dropdown">
+          {/* 模型列表 */}
+          <div className="model-list">
+            {paginatedModels.map((model) => (
+              <div
+                key={model.id}
+                className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
+                onClick={() => handleModelSelect(model.id)}
+              >
+                <div className="model-name">{model.id}</div>
+                <div className="model-provider">{model.provider}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* 分页控制 */}
+          {totalPages > 1 && (
+            <div className="model-pagination">
+              <button
+                disabled={page === 0}
+                onClick={() => setPage(page - 1)}
+                className="pagination-btn"
+              >
+                <FontAwesomeIcon icon={faAngleLeft} />
+              </button>
+              <span className="page-info">
+                {page + 1} / {totalPages}
+              </span>
+              <button
+                disabled={page >= totalPages - 1}
+                onClick={() => setPage(page + 1)}
+                className="pagination-btn"
+              >
+                <FontAwesomeIcon icon={faAngleRight} />
+              </button>
+            </div>
+          )}
+
+          {/* 搜索结果统计 */}
+          {searchText && (
+            <div className="search-results-info">
+              找到 {filteredModels.length} 个匹配的模型
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ChatPanel = memo(() => {
   const dispatch = useDispatch();
   // 从 chat slice 获取状态
@@ -112,11 +246,13 @@ const ChatPanel = memo(() => {
     toolCallState,
     questionCard,
     isHistoryPanelVisible,
-    isDeleteMode,
     deepSeekHistory,
-    showSettingsModal,
+    showApiSettingsModal,
+    showRagSettingsModal,
+    showGeneralSettingsModal,
     deepseekApiKey,
     openrouterApiKey,
+    siliconflowApiKey, // 新增：硅基流动API Key
     aliyunEmbeddingApiKey, // 新增：阿里云嵌入API Key
     intentAnalysisModel, // 新增：意图分析模型
     selectedModel,
@@ -130,6 +266,7 @@ const ChatPanel = memo(() => {
     additionalInfo,
     isCreationModeEnabled,
     showCreationModal,
+    isStreaming, // 新增：流式传输状态
   } = useSelector((state) => state.chat);
   
   // 使用 ref 来获取最新的状态值，避免闭包问题
@@ -156,8 +293,9 @@ const ChatPanel = memo(() => {
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false); // 新增：模式下拉菜单状态
   const [showPromptManager, setShowPromptManager] = useState(false); // 新增：提示词管理模态框状态
   const [showKnowledgeBasePanel, setShowKnowledgeBasePanel] = useState(false); // 新增：知识库面板显示状态
+  const [showModelSelectorPanel, setShowModelSelectorPanel] = useState(false); // 新增：模型选择面板显示状态
 
-  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send, on, removeListener, setAliyunEmbeddingApiKey: setAliyunEmbeddingApiKeyIpc, reinitializeModelProvider, reinitializeAliyunEmbedding } = useIpcRenderer();
+  const { invoke, getDeepSeekChatHistory, deleteDeepSeekChatHistory, clearDeepSeekConversation, getStoreValue, setStoreValue, listAllModels, send, on, removeListener, setAliyunEmbeddingApiKey: setAliyunEmbeddingApiKeyIpc, reinitializeModelProvider, reinitializeAliyunEmbedding, stopStreaming: stopStreamingIpc } = useIpcRenderer();
   
   // 处理外部链接点击
   const handleExternalLinkClick = useCallback(async (url, event) => {
@@ -204,6 +342,13 @@ const ChatPanel = memo(() => {
       if (storedOpenrouterApiKey) {
         dispatch(setOpenrouterApiKey(storedOpenrouterApiKey));
         console.log(`加载到的 OpenRouter API Key: ${storedOpenrouterApiKey}`);
+      }
+
+      // 加载硅基流动 API Key
+      const storedSiliconflowApiKey = await getStoreValue('siliconflowApiKey');
+      if (storedSiliconflowApiKey) {
+        dispatch(setSiliconflowApiKey(storedSiliconflowApiKey));
+        console.log(`加载到的硅基流动 API Key: ${storedSiliconflowApiKey}`);
       }
 
       // 加载阿里云嵌入API Key
@@ -363,7 +508,7 @@ const ChatPanel = memo(() => {
     } catch (error) {
       console.error('加载设置失败:', error);
     }
-  }, [dispatch, getStoreValue, setDeepseekApiKey, setOpenrouterApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider]); // 更新依赖
+  }, [dispatch, getStoreValue, setDeepseekApiKey, setOpenrouterApiKey, setSiliconflowApiKey, setSelectedModel, listAllModels, setAvailableModels, setSelectedProvider]); // 更新依赖
 
   const handleUserQuestionResponse = useCallback(async (response, toolCallId, isButtonClick) => {
     dispatch(setQuestionCard(null));
@@ -433,6 +578,18 @@ const ChatPanel = memo(() => {
     dispatch(setQuestionCard(null));
 
     try {
+      // 检查是否有可用的模型
+      if (!selectedModel || selectedModel.trim() === '') {
+        dispatch(appendMessage({
+          sender: 'System',
+          text: '当前没有可用的AI模型。请先前往设置页面配置API密钥。',
+          role: 'system',
+          content: '当前没有可用的AI模型。请先前往设置页面配置API密钥。',
+          className: 'system-error'
+        }));
+        return;
+      }
+
       // 直接从存储获取当前模式的自定义提示词，避免Redux状态同步延迟问题
       const storedCustomPrompts = await getStoreValue('customPrompts');
       const customPrompt = storedCustomPrompts ? storedCustomPrompts[currentMode] : '';
@@ -572,10 +729,66 @@ const ChatPanel = memo(() => {
     setShowConfirmationModal(true); // 显示确认弹窗
   }, [deleteDeepSeekChatHistory, loadDeepSeekChatHistory]);
 
+  // 处理ai-response事件，包括流式传输状态
+  useEffect(() => {
+    const handleAiResponse = (event, data) => {
+      const { type, payload } = data;
+      
+      if (type === 'streaming_started') {
+        console.log('[ChatPanel] 收到流式传输开始事件');
+        dispatch(setStreamingState({ isStreaming: true, abortController: null }));
+      } else if (type === 'streaming_ended') {
+        console.log('[ChatPanel] 收到流式传输结束事件');
+        dispatch(setStreamingState({ isStreaming: false, abortController: null }));
+      }
+    };
+
+    on('ai-response', handleAiResponse);
+
+    return () => {
+      removeListener('ai-response', handleAiResponse);
+    };
+  }, [on, removeListener, dispatch]);
+
   // 应用启动时加载一次设置
   useEffect(() => {
+    console.log('ChatPanel: 组件挂载，开始加载设置和模型列表');
     loadSettings();
   }, [loadSettings]); // loadSettings 已经是 useCallback，依赖稳定
+
+  // 新增：专门处理模型列表加载，确保模型选择器能正确显示
+  useEffect(() => {
+    const loadModelsOnStartup = async () => {
+      try {
+        console.log('ChatPanel: 启动时加载模型列表...');
+        const modelsResult = await listAllModels();
+        console.log('ChatPanel: 模型列表加载结果:', modelsResult.success, modelsResult.models ? modelsResult.models.length : 'N/A');
+        
+        if (modelsResult.success) {
+          dispatch(setAvailableModels(modelsResult.models));
+          console.log('ChatPanel: 模型列表已更新，数量:', modelsResult.models.length);
+          
+          // 如果没有选中模型，尝试设置一个默认模型
+          if (!selectedModel && modelsResult.models.length > 0) {
+            const defaultModel = modelsResult.models[0];
+            dispatch(setSelectedModel(defaultModel.id));
+            console.log('ChatPanel: 设置默认模型:', defaultModel.id);
+          }
+        } else {
+          console.error('ChatPanel: 模型列表加载失败:', modelsResult.error);
+        }
+      } catch (error) {
+        console.error('ChatPanel: 加载模型列表异常:', error);
+      }
+    };
+
+    // 延迟加载模型列表，确保其他初始化完成
+    const timer = setTimeout(() => {
+      loadModelsOnStartup();
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [listAllModels, dispatch, selectedModel]);
 
   // 移除不必要的 selectedModel 变化监听，避免无限循环
   // 状态同步已经在 loadSettings 中处理，不需要额外监听
@@ -630,12 +843,6 @@ const ChatPanel = memo(() => {
    // 旧的、基于 useEffect 的 diff 触发器已被移除，因为它不可靠。
    // 新的逻辑由一个专门的 'show-diff-preview' IPC 事件处理器直接触发。
 
-  // 新增 useEffect：在设置模态框显示时加载设置
-  useEffect(() => {
-    if (showSettingsModal) {
-      loadSettings();
-    }
-  }, [showSettingsModal, loadSettings]);
 
   // 自动滚动聊天区到底部 (此 useEffect 保留)
   useEffect(() => {
@@ -649,26 +856,50 @@ const ChatPanel = memo(() => {
       
       <div className="chat-panel-content">
         <div className="chat-header-actions">
-          {/* 新增的设置按钮，移到最左边 */}
-          <button className="settings-button" onClick={() => dispatch(setShowSettingsModal(true))} title="设置">
-            <FontAwesomeIcon icon={faGear} />
-          </button>
+          {/* 设置按钮已移动到左侧组件栏 */}
+          {/* 历史会话按钮移回ChatPanel */}
           <button className="history-button" onClick={() => {
             dispatch(setIsHistoryPanelVisible(!isHistoryPanelVisible));
-            dispatch(setIsDeleteMode(false));
-          }} title="查看历史记录">
+            // 关闭其他面板
+            if (!isHistoryPanelVisible) {
+              setShowModelSelectorPanel(false);
+              setShowKnowledgeBasePanel(false);
+            }
+          }} title="历史会话">
             <FontAwesomeIcon icon={faClock} />
           </button>
-          <button className="clear-history-button" onClick={() => {
-            dispatch(setIsHistoryPanelVisible(true));
-            dispatch(setIsDeleteMode(true));
-          }} title="清理历史记录">
-            <FontAwesomeIcon icon={faTrashCan} />
-          </button>
-          {/* 新增的知识库按钮 */}
-          <button className="knowledgebase-button" onClick={() => setShowKnowledgeBasePanel(!showKnowledgeBasePanel)} title="知识库管理">
+          {/* 保留知识库按钮和模型选择器 */}
+          <button className="knowledgebase-button" onClick={() => {
+            setShowKnowledgeBasePanel(!showKnowledgeBasePanel);
+            // 关闭其他面板
+            if (!showKnowledgeBasePanel) {
+              setShowModelSelectorPanel(false);
+              dispatch(setIsHistoryPanelVisible(false));
+            }
+          }} title="知识库管理">
             <FontAwesomeIcon icon={faBook} />
           </button>
+          {/* 模型选择器 - 移动到头部按钮区域 */}
+          <div className="model-selector-header-wrapper">
+            <button
+              className="model-selector-button"
+              onClick={() => {
+                setShowModelSelectorPanel(!showModelSelectorPanel);
+                // 关闭其他面板
+                if (!showModelSelectorPanel) {
+                  setShowKnowledgeBasePanel(false);
+                  dispatch(setIsHistoryPanelVisible(false));
+                }
+              }}
+              title=""
+            >
+              <span className="selected-model-name">
+                {selectedModel ? availableModels.find(m => m.id === selectedModel)?.id || selectedModel : ''}
+              </span>
+              <span className="expand-icon">▼</span>
+            </button>
+          </div>
+          {/* 停止按钮已移动到输入区域 */}
         </div>
 
         <button className="reset-chat-button" onClick={handleResetChat}>×</button>
@@ -838,13 +1069,32 @@ const ChatPanel = memo(() => {
             history={deepSeekHistory}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
-            isDeleteMode={isDeleteMode}
           />
         )}
 
         {/* 知识库面板 */}
         {showKnowledgeBasePanel && (
           <KnowledgeBasePanel onClose={() => setShowKnowledgeBasePanel(false)} />
+        )}
+
+        {/* 模型选择面板 */}
+        {showModelSelectorPanel && (
+          <ModelSelectorPanel
+            selectedModel={selectedModel}
+            availableModels={availableModels}
+            onModelChange={async (modelId) => {
+              dispatch(setSelectedModel(modelId));
+              // 保存到持久化存储
+              try {
+                await setStoreValue('selectedModel', modelId);
+                console.log(`[模型选择面板] 已保存模型选择: ${modelId}`);
+              } catch (error) {
+                console.error('[模型选择面板] 保存模型选择失败:', error);
+              }
+              setShowModelSelectorPanel(false);
+            }}
+            onClose={() => setShowModelSelectorPanel(false)}
+          />
         )}
 
         {/* New Tool Action Bar, displayed above the input group */}
@@ -889,6 +1139,8 @@ const ChatPanel = memo(() => {
             {/* 输入区域已被移除，用户应使用主输入框进行回复 */}
           </div>
         )}
+
+
         <div className="chat-input-group">
 
           <div className="mode-selector-dropdown">
@@ -933,18 +1185,50 @@ const ChatPanel = memo(() => {
               }
             }}
           ></textarea>
-          <button id="sendMessage" className="send-icon" onClick={() => {
-            const chatInput = document.getElementById('chatInput');
-            handleSendMessage(chatInput.value);
-            chatInput.value = '';
-          }}><FontAwesomeIcon icon={faPaperPlane} /></button>
+          {/* 动态切换发送按钮和停止按钮 */}
+          {isStreaming ? (
+            <button
+              className="stop-button"
+              onClick={async () => {
+                try {
+                  console.log('[ChatPanel] 用户点击停止按钮');
+                  dispatch(stopStreaming());
+                  await stopStreamingIpc();
+                  console.log('[ChatPanel] 停止请求已发送到后端');
+                } catch (error) {
+                  console.error('[ChatPanel] 停止流式传输失败:', error);
+                }
+              }}
+              title="停止生成"
+            >
+              <FontAwesomeIcon icon={faStop} />
+            </button>
+          ) : (
+            <button id="sendMessage" className="send-icon" onClick={() => {
+              const chatInput = document.getElementById('chatInput');
+              handleSendMessage(chatInput.value);
+              chatInput.value = '';
+            }}><FontAwesomeIcon icon={faPaperPlane} /></button>
+          )}
         </div>
       </div>
 
-      {/* 统一设置模态框 */}
-      <UnifiedSettingsModal
-        isOpen={showSettingsModal}
-        onClose={() => dispatch(setShowSettingsModal(false))}
+      {/* API设置模态框 */}
+      <ApiSettingsModal
+        isOpen={showApiSettingsModal}
+        onClose={() => dispatch(setShowApiSettingsModal(false))}
+      />
+
+      {/* RAG知识库设置模态框 */}
+      <RagSettingsModal
+        isOpen={showRagSettingsModal}
+        onClose={() => dispatch(setShowRagSettingsModal(false))}
+      />
+
+      {/* 通用设置模态框 */}
+      <GeneralSettingsModal
+        isOpen={showGeneralSettingsModal}
+        onClose={() => dispatch(setShowGeneralSettingsModal(false))}
       />
 
       {showConfirmationModal && (
