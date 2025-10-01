@@ -111,6 +111,10 @@
     border-radius: 5px;
     cursor: pointer;
     font-size: 16px;
+    width: 100%; /* 确保与停止按钮宽度一致 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 #sendMessage:hover {
@@ -1098,6 +1102,167 @@ input:checked + .slider:before {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+
+/* 模型选择器样式 */
+.model-selector-wrapper {
+  margin-bottom: 8px;
+}
+
+.model-selector-container {
+  position: relative;
+  width: 100%;
+}
+
+.model-selector-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #3a3a3e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  color: #ccc;
+}
+
+.model-selector-bar:hover {
+  background-color: #4a4a4e;
+  border-color: #777;
+}
+
+.selected-model-name {
+  font-weight: 500;
+}
+
+.expand-icon {
+  font-size: 12px;
+  color: #888;
+}
+
+.model-selector-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background-color: #3a3a3e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  z-index: 1000;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.model-search-container {
+  padding: 8px;
+  border-bottom: 1px solid #555;
+}
+
+.model-search-input {
+  width: 100%;
+  padding: 6px 8px;
+  background-color: #2a2a2e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 13px;
+}
+
+.model-search-input:focus {
+  outline: none;
+  border-color: #357abd;
+}
+
+.model-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.model-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #444;
+  transition: background-color 0.2s ease;
+}
+
+.model-item:hover {
+  background-color: #4a4a4e;
+}
+
+.model-item.selected {
+  background-color: #357abd;
+  color: white;
+}
+
+.model-name {
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.model-provider {
+  font-size: 11px;
+  color: #888;
+}
+
+.model-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px;
+  border-top: 1px solid #555;
+  gap: 20px;
+}
+
+.model-pagination .pagination-btn {
+  padding: 0;
+  background-color: transparent !important;
+  border: none !important;
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+  width: 24px;
+  height: 24px;
+}
+
+.model-pagination .pagination-btn:hover:not(:disabled) {
+  color: #fff;
+  background-color: transparent !important;
+}
+
+.model-pagination .pagination-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  background-color: transparent !important;
+}
+
+/* 确保FontAwesome图标没有背景色 */
+.model-pagination .pagination-btn svg {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+.page-info {
+  font-size: 12px;
+  color: #888;
+  min-width: 40px;
+  text-align: center;
+}
+
+.search-results-info {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  border-top: 1px solid #555;
+}
   transition: background-color 0.2s;
 }
 
@@ -1134,6 +1299,88 @@ input:checked + .slider:before {
   background-color: #2a4e7a;
 }
 
+/* 头部模型选择器样式 */
+.model-selector-header-wrapper {
+  margin-left: 10px;
+  flex: 1;
+  max-width: 200px;
+  position: relative; /* 为绝对定位的子元素提供参考 */
+  z-index: 1001; /* 确保在其他内容之上 */
+}
+
+.model-selector-header-wrapper .model-selector-container {
+  width: 100%;
+  position: relative; /* 为下拉菜单提供定位上下文 */
+}
+
+.model-selector-header-wrapper .model-selector-bar {
+  padding: 5px 8px;
+  font-size: 12px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative; /* 确保下拉菜单相对于此定位 */
+  z-index: 1; /* 确保在正常层级 */
+}
+
+/* 模型选择栏中的搜索输入框样式 */
+.model-search-input-bar {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ccc;
+  font-size: 11px;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+}
+
+.model-search-input-bar::placeholder {
+  color: #888;
+  font-style: italic;
+}
+
+.model-search-input-bar:focus {
+  outline: none;
+  border: none;
+}
+
+.model-selector-header-wrapper .selected-model-name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.model-selector-header-wrapper .model-selector-dropdown {
+  position: absolute; /* 使用绝对定位，相对于容器 */
+  top: 100%; /* 从容器底部开始 */
+  left: 0;
+  width: 180px; /* 增加宽度到180px */
+  max-height: 350px; /* 增加最大高度 */
+  margin-top: 4px; /* 与容器保持一点间距 */
+  z-index: 2000; /* 更高的z-index确保在最上层 */
+  overflow: visible; /* 允许内容溢出 */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); /* 添加阴影增强视觉效果 */
+}
+
+/* 确保聊天头部容器不会限制下拉菜单 */
+.chat-header-actions {
+  position: relative; /* 为绝对定位的子元素提供参考 */
+  z-index: 1000; /* 确保头部按钮在正常层级 */
+  overflow: visible; /* 允许子元素溢出 */
+  min-height: 50px; /* 确保有足够的高度 */
+}
+
+/* 确保聊天面板内容不会限制下拉菜单 */
+.chat-panel-content {
+  overflow: visible; /* 允许内容溢出 */
+  position: relative; /* 为绝对定位提供参考 */
+}
+
 /* 知识库按钮样式 */
 .knowledgebase-button {
   background-color: #3a3f4b; /* 与其他按钮一致的背景色 */
@@ -1157,6 +1404,66 @@ input:checked + .slider:before {
   color: var(--primary-color); /* 悬停时文字变为绿色 */
 }
 
+/* 模型选择按钮样式 */
+.model-selector-button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 8px;
+  background-color: #3a3a3e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #ccc;
+  transition: all 0.2s ease;
+  width: 100%;
+  min-width: 120px;
+}
+
+/* 停止按钮样式 */
+.stop-button {
+    background-color: #f44336; /* 红色背景 */
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    width: 100%; /* 确保与发送按钮宽度一致 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+}
+
+.stop-button:hover {
+    background-color: #d32f2f; /* 悬停时深红色 */
+}
+
+.stop-button:active {
+    background-color: #b71c1c; /* 点击时更深红色 */
+}
+
+.model-selector-button:hover {
+  background-color: #4a4a4e;
+  border-color: #777;
+}
+
+.model-selector-button .selected-model-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.model-selector-button .expand-icon {
+  font-size: 10px;
+  color: #888;
+  margin-left: 5px;
+}
+
 /* 知识库面板容器样式 */
 .knowledge-base-panel {
   position: absolute;
@@ -1168,6 +1475,23 @@ input:checked + .slider:before {
   border: 1px solid #444444;
   border-radius: 8px;
   z-index: 100; /* 确保在其他内容之上 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+/* 模型选择面板容器样式 */
+.model-selector-panel {
+  position: absolute;
+  top: 60px; /* 从聊天头部下方开始 */
+  left: 0px;
+  right: 0px;
+  bottom: 0px;
+  background-color: #333333; /* 与聊天区背景一致 */
+  border: 1px solid #444444;
+  border-radius: 8px;
+  z-index: 101; /* 比知识库面板更高，确保在最上层 */
   display: flex;
   flex-direction: column;
   overflow: hidden;

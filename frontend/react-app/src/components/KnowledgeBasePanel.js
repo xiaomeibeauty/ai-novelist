@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faSync, faTimes, faBook, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faSync, faTimes, faBook, faTrash, faEdit } from '@fortawesome/free-solid-svg-icons';
 import ConfirmationModal from './ConfirmationModal';
 import NotificationModal from './NotificationModal';
+import RenameKbFileModal from './RenameKbFileModal';
 import './KnowledgeBasePanel.css';
 
 const KnowledgeBasePanel = ({ onClose }) => {
@@ -11,7 +12,9 @@ const KnowledgeBasePanel = ({ onClose }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [fileToDelete, setFileToDelete] = useState(null);
+  const [fileToRename, setFileToRename] = useState(null);
   const [notification, setNotification] = useState(null);
   
   // 监听 notification 状态变化
@@ -106,15 +109,47 @@ const KnowledgeBasePanel = ({ onClose }) => {
     }
   };
 
-  // 处理文件信息查看
-  const handleFileInfo = (file) => {
-    console.log('查看文件信息:', file);
-    // 这里可以添加显示文件详细信息的逻辑
-    setNotification({
-      type: 'info',
-      message: `文件信息: ${file.filename}, ${file.documentCount}个文档片段`,
-      duration: 3000
-    });
+
+  // 处理文件重命名
+  const handleRenameFile = async (oldFilename, newFilename) => {
+    setLoading(true);
+    try {
+      const result = await window.ipcRenderer.invoke('rename-kb-file', oldFilename, newFilename);
+      if (result.success) {
+        setNotification({
+          type: 'success',
+          message: `文件 "${oldFilename}" 已成功重命名为 "${newFilename}"`,
+          duration: 3000
+        });
+        // 重新加载文件列表
+        await loadKnowledgeBaseFiles();
+      } else {
+        throw new Error(result.error || '重命名失败');
+      }
+    } catch (err) {
+      setNotification({
+        type: 'error',
+        message: `重命名失败: ${err.message}`,
+        duration: 5000
+      });
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 打开重命名确认对话框
+  const openRenameModal = (file) => {
+    console.log('打开重命名对话框，文件:', file);
+    setFileToRename(file);
+    setRenameModalOpen(true);
+  };
+
+  // 关闭重命名确认对话框
+  const closeRenameModal = () => {
+    console.log('关闭重命名对话框');
+    setRenameModalOpen(false);
+    setFileToRename(null);
   };
 
   // 打开删除确认对话框
@@ -236,12 +271,12 @@ const KnowledgeBasePanel = ({ onClose }) => {
               </div>
               <div className="file-actions">
                 <button
-                  className="info-btn"
-                  onClick={() => handleFileInfo(file)}
-                  title="查看文件具体信息"
+                  className="rename-btn"
+                  onClick={() => openRenameModal(file)}
+                  title="重命名此文件"
                   disabled={loading}
                 >
-                  详情
+                  <FontAwesomeIcon icon={faEdit} />
                 </button>
                 <button
                   className="delete-btn"
@@ -249,7 +284,7 @@ const KnowledgeBasePanel = ({ onClose }) => {
                   title="删除此文件的知识库"
                   disabled={loading}
                 >
-                  删除
+                  <FontAwesomeIcon icon={faTrash} />
                 </button>
               </div>
             </div>
@@ -267,6 +302,16 @@ const KnowledgeBasePanel = ({ onClose }) => {
           }
           onConfirm={confirmDelete}
           onCancel={closeDeleteConfirm}
+        />
+      )}
+
+      {/* 重命名模态框 */}
+      {renameModalOpen && (
+        <RenameKbFileModal
+          isOpen={renameModalOpen}
+          onClose={closeRenameModal}
+          file={fileToRename}
+          onRename={handleRenameFile}
         />
       )}
 

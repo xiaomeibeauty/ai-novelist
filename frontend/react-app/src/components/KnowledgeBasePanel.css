@@ -232,7 +232,7 @@
 
 .file-name {
   font-weight: 600;
-  color: #E0E0E0;
+  color: #efebeb;
   margin-bottom: 8px;
   white-space: nowrap;
   overflow: hidden;
@@ -245,14 +245,14 @@
   display: flex;
   gap: 12px;
   font-size: 13px;
-  color: #B0B0B0;
+  color: #131212;
   flex-wrap: wrap;
 }
 
 .document-count {
   display: flex;
   align-items: center;
-  background: #2D2D2D;
+  background: #090909;
   padding: 4px 8px;
   border-radius: 12px;
   border: 1px solid #444444;
@@ -302,6 +302,29 @@
 }
 
 .info-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rename-btn {
+  padding: 6px 12px;
+  background: #3a3f4b;
+  color: #abb2bf;
+  border: 1px solid #5c6370;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.3s ease;
+  margin-right: 8px;
+}
+
+.rename-btn:hover:not(:disabled) {
+  background: #4a4f5b;
+  border-color: #00AD62;
+  color: #00AD62;
+}
+
+.rename-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

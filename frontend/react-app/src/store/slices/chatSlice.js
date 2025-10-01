@@ -47,13 +47,16 @@ const chatSlice = createSlice({
     deepSeekHistory: [],
     deepseekApiKey: '',
     openrouterApiKey: '',
+    siliconflowApiKey: '', // 新增：硅基流动API Key
     aliyunEmbeddingApiKey: '', // 新增：阿里云嵌入API Key
+    ollamaBaseUrl: 'http://127.0.0.1:11434', // 新增：Ollama服务地址
     intentAnalysisModel: '', // 新增：意图分析模型
     selectedModel: '',
     selectedProvider: '', // 取消默认的DeepSeek设置
     isHistoryPanelVisible: false,
-    isDeleteMode: false,
-    showSettingsModal: false,
+    showApiSettingsModal: false,
+    showRagSettingsModal: false,
+    showGeneralSettingsModal: false,
     availableModels: [], // 新增：用于存储所有可用模型列表
     customSystemPrompt: DEFAULT_SYSTEM_PROMPT, // 新增：自定义系统提示词（旧版，用于通用模式）
     customPrompts: { // 新增：每个模式的自定义提示词
@@ -68,16 +71,20 @@ const chatSlice = createSlice({
     // 新增：每个模式的功能启用状态（工具功能已硬编码，只保留RAG检索）
     modeFeatureSettings: {
       general: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: [] // 新增：选择的RAG集合名称数组
       },
       outline: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: []
       },
       writing: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: []
       },
       adjustment: {
-        ragRetrievalEnabled: false
+        ragRetrievalEnabled: false,
+        ragCollectionNames: []
       }
     },
     // 新增：上下文限制设置
@@ -126,7 +133,10 @@ const chatSlice = createSlice({
     },
     // 新增：创作模式状态
     isCreationModeEnabled: true,
-    showCreationModal: false
+    showCreationModal: false,
+    // 新增：停止功能相关状态
+    isStreaming: false, // 是否正在流式传输
+    abortController: null // 用于中止请求的控制器
   },
   reducers: {
     deleteMessage: (state, action) => {
@@ -253,9 +263,6 @@ const chatSlice = createSlice({
     setIsHistoryPanelVisible: (state, action) => {
       state.isHistoryPanelVisible = action.payload;
     },
-    setIsDeleteMode: (state, action) => {
-      state.isDeleteMode = action.payload;
-    },
     setDeepSeekHistory: (state, action) => {
       state.deepSeekHistory = action.payload;
     },
@@ -274,14 +281,26 @@ const chatSlice = createSlice({
     setSelectedModel: (state, action) => {
       state.selectedModel = action.payload;
     },
-    setShowSettingsModal: (state, action) => {
-      state.showSettingsModal = action.payload;
+    setShowApiSettingsModal: (state, action) => {
+      state.showApiSettingsModal = action.payload;
+    },
+    setShowRagSettingsModal: (state, action) => {
+      state.showRagSettingsModal = action.payload;
+    },
+    setShowGeneralSettingsModal: (state, action) => {
+      state.showGeneralSettingsModal = action.payload;
     },
     setDeepseekApiKey: (state, action) => {
       state.deepseekApiKey = action.payload;
     },
     setOpenrouterApiKey: (state, action) => {
       state.openrouterApiKey = action.payload;
+    },
+    setSiliconflowApiKey: (state, action) => { // 新增：设置硅基流动API Key
+      state.siliconflowApiKey = action.payload;
+    },
+    setOllamaBaseUrl: (state, action) => {
+      state.ollamaBaseUrl = action.payload;
     },
     setSelectedProvider: (state, action) => {
       state.selectedProvider = action.payload;
@@ -327,8 +346,16 @@ const chatSlice = createSlice({
       const { mode } = action.payload;
       if (state.modeFeatureSettings[mode]) {
         state.modeFeatureSettings[mode] = {
-          ragRetrievalEnabled: false
+          ragRetrievalEnabled: false,
+          ragCollectionNames: []
         };
+      }
+    },
+    // 新增：设置特定模式的RAG集合选择
+    setRagCollectionNames: (state, action) => {
+      const { mode, collectionNames } = action.payload;
+      if (state.modeFeatureSettings[mode]) {
+        state.modeFeatureSettings[mode].ragCollectionNames = collectionNames;
       }
     },
     // 新增：设置上下文限制设置
@@ -369,6 +396,26 @@ const chatSlice = createSlice({
       const { info } = action.payload;
       for (const mode of ['general', 'outline', 'writing', 'adjustment']) {
         state.additionalInfo[mode] = { ...info };
+      }
+    },
+    // 新增：停止功能相关reducer
+    setStreamingState: (state, action) => {
+      const { isStreaming, abortController } = action.payload;
+      state.isStreaming = isStreaming;
+      state.abortController = abortController;
+    },
+    stopStreaming: (state) => {
+      if (state.abortController) {
+        state.abortController.abort();
+        console.log('[chatSlice] 已中止流式传输');
+      }
+      state.isStreaming = false;
+      state.abortController = null;
+      
+      // 将最后一条AI消息的加载状态设为false
+      const lastMessage = state.messages[state.messages.length - 1];
+      if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isLoading) {
+        lastMessage.isLoading = false;
       }
     },
     // --- 新增：用于处理来自 IPC 的 AI 响应的通用 Reducer ---
@@ -674,15 +721,18 @@ export const {
   // 导出所有其他 chatSlice.actions
   // ipcAiResponseReceived 不需要导出，因为它只在 extraReducers 中被调用
   setIsHistoryPanelVisible,
-  setIsDeleteMode,
   setDeepSeekHistory,
   approveToolCalls,
   rejectToolCalls,
   setSelectedModel,
-  setShowSettingsModal,
+  setShowApiSettingsModal,
+  setShowRagSettingsModal,
+  setShowGeneralSettingsModal,
   setDeepseekApiKey,
   setOpenaiApiKey, // 新增
   setOpenrouterApiKey,
+  setSiliconflowApiKey, // 新增：导出 setSiliconflowApiKey
+  setOllamaBaseUrl, // 新增
   setSelectedProvider, // 新增：导出 setSelectedProvider
   setAliyunEmbeddingApiKey, // 新增：导出 setAliyunEmbeddingApiKey
   setIntentAnalysisModel, // 新增：导出 setIntentAnalysisModel
@@ -696,12 +746,15 @@ export const {
   setModeFeatureSetting, // 新增：导出 setModeFeatureSetting
   resetModeFeatureSettings, // 新增：导出 resetModeFeatureSettings
   setContextLimitSettings, // 新增：导出 setContextLimitSettings
+  setRagCollectionNames, // 新增：导出 setRagCollectionNames
   setAdditionalInfoForMode, // 新增：导出 setAdditionalInfoForMode
   setAdditionalInfoFieldForMode, // 新增：导出 setAdditionalInfoFieldForMode
   resetAdditionalInfoForMode, // 新增：导出 resetAdditionalInfoForMode
   setIsCreationModeEnabled, // 新增：导出 setIsCreationModeEnabled
   setShowCreationModal, // 新增：导出 setShowCreationModal
   setAdditionalInfoForAllModes, // 新增：导出 setAdditionalInfoForAllModes
+  setStreamingState, // 新增：导出 setStreamingState
+  stopStreaming, // 新增：导出 stopStreaming
   deleteMessage,
   startEditing,
   // submitEdit,

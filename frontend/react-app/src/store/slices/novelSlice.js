@@ -100,6 +100,13 @@ const novelSlice = createSlice({
     status: 'idle', // 'idle' | 'loading' | 'succeeded' | 'failed'
     error: null,
     refreshCounter: 0,
+    // 分屏对比相关状态
+    splitView: {
+      enabled: false,
+      layout: 'horizontal', // 'horizontal' | 'vertical'
+      leftTabId: null,
+      rightTabId: null,
+    },
   },
   reducers: {
     setActiveTab: (state, action) => {
@@ -251,6 +258,35 @@ const novelSlice = createSlice({
         }
       }
     },
+    // 新增：拖动排序标签页
+    reorderTabs: (state, action) => {
+      const { fromIndex, toIndex } = action.payload;
+      if (fromIndex === toIndex) return;
+      
+      const [movedTab] = state.openTabs.splice(fromIndex, 1);
+      state.openTabs.splice(toIndex, 0, movedTab);
+    },
+    // 新增：分屏对比相关操作
+    enableSplitView: (state, action) => {
+      const { leftTabId, rightTabId, layout = 'horizontal' } = action.payload;
+      state.splitView.enabled = true;
+      state.splitView.leftTabId = leftTabId;
+      state.splitView.rightTabId = rightTabId;
+      state.splitView.layout = layout;
+    },
+    disableSplitView: (state) => {
+      state.splitView.enabled = false;
+      state.splitView.leftTabId = null;
+      state.splitView.rightTabId = null;
+    },
+    setSplitViewLayout: (state, action) => {
+      state.splitView.layout = action.payload;
+    },
+    setSplitViewTabs: (state, action) => {
+      const { leftTabId, rightTabId } = action.payload;
+      state.splitView.leftTabId = leftTabId;
+      state.splitView.rightTabId = rightTabId;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -345,5 +381,10 @@ export const {
   fileWritten,
   fileDeleted,
   fileRenamed,
+  reorderTabs,
+  enableSplitView,
+  disableSplitView,
+  setSplitViewLayout,
+  setSplitViewTabs,
 } = novelSlice.actions;
 export default novelSlice.reducer;

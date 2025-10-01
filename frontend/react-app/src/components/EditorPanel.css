@@ -6,6 +6,7 @@
     height: 100%;
     padding: var(--border-radius-medium); /* 使用全局间距变量 */
     background-color: var(--panel-bg-color);
+    overflow: hidden; /* 防止内容溢出 */
 }
 
 
@@ -16,10 +17,8 @@
 }
 
 .unsaved-indicator {
-    color: var(--text-color-light); /* 改为浅灰色 */
-    font-size: 1.5em;
-    font-weight: bold;
-    margin-left: 5px;
+    color: var(--primary-color, #00AD62);
+    font-weight: 600;
 }
 
 .novel-title-input {
@@ -55,13 +54,11 @@
 .new-chapter-button:hover {
     background-color: var(--primary-color-dark);
 }
-
 .editor-container {
   display: flex;
   flex-direction: row;
-  flex-grow: 1;
+  height: 1000px; /* 固定高度，确保标签页有足够空间 */
   overflow: hidden; /* 确保子元素滚动 */
-  min-height: 0; /* 修复 flex 子元素溢出问题 */
 }
 
 .line-numbers-gutter {
@@ -149,8 +146,9 @@
     flex-direction: column; /* 垂直排列 */
     justify-content: center; /* 垂直居中 */
     align-items: center; /* 水平居中 */
-    background-color: var(--panel-bg-color); /* 背景色 */
     color: var(--text-color-primary); /* 文字颜色 */
+    position: relative;
+    overflow: hidden;
 }
 
 /* 操作按钮通用样式 */
@@ -227,4 +225,44 @@
 
 .deleted-file-message p {
   margin: 10px 0;
+}
+
+/* 自动保存状态样式 */
+.auto-save-status {
+  display: flex;
+  align-items: center;
+  margin-right: 10px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.saving-indicator {
+  color: var(--primary-color);
+  animation: pulse 1.5s infinite;
+}
+
+.saved-indicator {
+  color: var(--success-color, #28a745);
+}
+
+.unsaved-indicator {
+  color: var(--primary-color, #00AD62);
+  font-weight: 600;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 移除EditorPanel中的保存按钮样式 */
+.editor-panel-content .save-button {
+  display: none;
 }

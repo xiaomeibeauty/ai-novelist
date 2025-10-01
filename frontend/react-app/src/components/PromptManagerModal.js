@@ -401,18 +401,6 @@ const fetchDefaultPrompts = async () => {
                     </div>
                   )}
 
-                  <div className="feature-toggle">
-                    <input
-                      type="checkbox"
-                      id={`${mode}-rag`}
-                      checked={localFeatureSettings[mode].ragRetrievalEnabled}
-                      onChange={(e) => handleFeatureSettingChange(mode, 'ragRetrievalEnabled', e.target.checked)}
-                    />
-                    <label htmlFor={`${mode}-rag`}>启用RAG检索</label>
-                  </div>
-                  <div className="feature-description">
-                    在此模式下允许AI使用知识库检索功能获取相关信息
-                  </div>
 
                   {/* 单个模式的上下文设置 */}
                   <ModeContextSettings mode={mode} modeName={getModeDisplayName(mode)} />

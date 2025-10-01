@@ -91,6 +91,33 @@ class RagIpcHandler {
             message: 'API Key测试功能已禁用，请保存后重启应用'
         };
     }
+
+    /**
+     * 获取所有知识库集合列表
+     * @returns {Promise<Object>} 集合列表结果
+     */
+    async listKbCollections() {
+        try {
+            console.log("[RagIpcHandler] 获取知识库集合列表...");
+            
+            // 使用CollectionManager的listCollections方法
+            const collections = await this.collectionManager.listCollections();
+            
+            console.log(`[RagIpcHandler] 获取到 ${collections.length} 个集合`);
+            
+            return {
+                success: true,
+                collections: collections
+            };
+            
+        } catch (error) {
+            console.error("[RagIpcHandler] 获取集合列表失败:", error);
+            return {
+                success: false,
+                error: `获取集合列表失败: ${error.message}`
+            };
+        }
+    }
 }
 
 // 导出单例

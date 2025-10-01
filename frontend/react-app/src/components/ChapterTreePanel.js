@@ -4,7 +4,7 @@ import useIpcRenderer from '../hooks/useIpcRenderer';
 import { setChapters, triggerChapterRefresh, openTab } from '../store/slices/novelSlice'; // 导入 openTab, 移除旧的
 import './ChapterTreePanel.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faCaretRight, faCaretDown, faFolderPlus, faFileCirclePlus, faFolder, faFile, faRotate } from '@fortawesome/free-solid-svg-icons'; // 导入新图标和刷新图标
+import { faGear, faCaretRight, faCaretDown, faFolderPlus, faFileCirclePlus, faFolder, faFile, faRotate, faEdit, faCheck, faTimes } from '@fortawesome/free-solid-svg-icons'; // 导入新图标和刷新图标
 import CombinedIcon from './CombinedIcon';
 import ContextMenu from './ContextMenu'; // 引入 ContextMenu 组件
 import NotificationModal from './NotificationModal'; // 新增
@@ -32,6 +32,15 @@ function ChapterTreePanel() {
   const [onConfirmCallback, setOnConfirmCallback] = useState(null); // 新增
   const [onCancelCallback, setOnCancelCallback] = useState(null); // 新增
   const [showPromptManager, setShowPromptManager] = useState(false); // 新增：提示词管理模态框状态
+
+  // 新增状态用于控制前缀编辑
+  const [editingPrefix, setEditingPrefix] = useState({
+    itemId: null,
+    prefix: '',
+    isFolder: false,
+    currentPath: ''
+  });
+
 
   // 新增状态用于控制右键菜单
   const [contextMenu, setContextMenu] = useState({
@@ -113,7 +122,7 @@ function ChapterTreePanel() {
     }
   }, [dispatch]);
 
-  // 辅助函数：根据文件名和是否为文件夹获取显示名称（去除文件拓展名）
+  // 辅助函数：根据文件名获取显示名称（去除文件拓展名）
   const getDisplayName = useCallback((name, isFolder) => {
     if (isFolder) {
       return name;
@@ -142,6 +151,103 @@ function ChapterTreePanel() {
       const pathParts = path.split('/');
       return findFolderByPath(items, pathParts, 0);
   }, [getDisplayName]); //getDisplayName添加到依赖项
+
+  // 辅助函数：提取前缀用于显示
+  const getDisplayPrefix = useCallback((item) => {
+    // 使用后端生成的 displayPrefix
+    return item.displayPrefix || '';
+  }, []);
+
+  // 处理排序顺序更改
+  // 处理前缀编辑
+  const handlePrefixEdit = useCallback((itemId, currentPrefix, isFolder, currentPath) => {
+    setEditingPrefix({
+      itemId,
+      prefix: currentPrefix,
+      isFolder,
+      currentPath
+    });
+  }, []);
+
+  // 取消前缀编辑
+  const handlePrefixEditCancel = useCallback(() => {
+    setEditingPrefix({
+      itemId: null,
+      prefix: '',
+      isFolder: false,
+      currentPath: ''
+    });
+  }, []);
+
+  // 确认前缀编辑
+  const handlePrefixEditConfirm = useCallback(async () => {
+    if (!editingPrefix.itemId || !editingPrefix.prefix) {
+      handlePrefixEditCancel();
+      return;
+    }
+
+    try {
+      const newPosition = parseInt(editingPrefix.prefix, 10);
+      if (isNaN(newPosition) || newPosition < 1) {
+        setNotificationMessage('请输入有效的数字！');
+        setShowNotificationModal(true);
+        return;
+      }
+
+      // 获取当前目录的所有项目
+      const currentItems = getSiblingItems(chapters, editingPrefix.currentPath);
+      if (!currentItems || currentItems.length === 0) {
+        console.error('无法获取当前目录的项目');
+        return;
+      }
+
+      // 找到要移动的项目
+      const targetItem = currentItems.find(item => item.id === editingPrefix.itemId);
+      if (!targetItem) {
+        console.error('未找到要移动的项目');
+        return;
+      }
+
+      // 创建新的排序顺序
+      const newOrder = [...currentItems];
+      const currentIndex = newOrder.findIndex(item => item.id === editingPrefix.itemId);
+      
+      if (currentIndex === -1) {
+        console.error('项目不在当前列表中');
+        return;
+      }
+
+      // 移动项目到新位置
+      const [movedItem] = newOrder.splice(currentIndex, 1);
+      const newIndex = Math.min(Math.max(newPosition - 1, 0), newOrder.length);
+      newOrder.splice(newIndex, 0, movedItem);
+
+      // 提取项目ID列表
+      const itemIds = newOrder.map(item => item.id);
+
+      // 调用后端API更新排序顺序
+      const result = await invoke('update-item-order', {
+        directoryPath: editingPrefix.currentPath || '',
+        itemIds: itemIds
+      });
+
+      if (result.success) {
+        setNotificationMessage('排序顺序更新成功！');
+        setShowNotificationModal(true);
+        fetchChapters(); // 刷新章节列表
+      } else {
+        setNotificationMessage(`排序顺序更新失败: ${result.error}`);
+        setShowNotificationModal(true);
+      }
+    } catch (error) {
+      console.error('排序顺序更改失败:', error);
+      setNotificationMessage('排序顺序更改失败！');
+      setShowNotificationModal(true);
+    } finally {
+      handlePrefixEditCancel();
+    }
+  }, [editingPrefix, chapters, getSiblingItems, invoke, fetchChapters, handlePrefixEditCancel]);
+
 
   // 注册 IPC 监听器和初始加载
   useEffect(() => {
@@ -376,44 +482,22 @@ function ChapterTreePanel() {
 
   const handleNewFile = useCallback(async (parentPath = '') => {
     const defaultTitle = 'Untitled';
-    let newTitleBase = defaultTitle;
-    let newTitleWithExt = `${newTitleBase}.txt`;
-    let counter = 1;
-
-
-    const siblingItems = getSiblingItems(chapters, parentPath);
-
-    // 检查同级目录下是否存在同名文件，并生成副本名称
-    while (siblingItems.some(ch => !ch.isFolder && ch.title === newTitleWithExt)) {
-        newTitleBase = `${defaultTitle}-副本${counter}`;
-        newTitleWithExt = `${newTitleBase}.txt`;
-        counter++;
-    }
-
-    const newFilePath = parentPath ? `${parentPath}/${newTitleWithExt}` : newTitleWithExt;
+    
+    // 不再使用前缀文件名，直接使用原始文件名
+    const fileName = `${defaultTitle}.txt`;
+    const newFilePath = parentPath ? `${parentPath}/${fileName}` : fileName;
     await handleIPCAction('create-novel-file', { filePath: newFilePath, content: '' });
     handleCloseContextMenu();
-  }, [handleIPCAction, chapters, handleCloseContextMenu, getDisplayName]);
+  }, [handleIPCAction, handleCloseContextMenu]);
 
   const handleNewFolder = useCallback(async (parentPath = '') => {
-    const defaultFolderName = '新文件夹'; // 更改默认文件夹名称为中文
-    let newFolderNameBase = defaultFolderName;
-    let newFolderName = newFolderNameBase;
-    let counter = 1;
-
-
-    const siblingItems = getSiblingItems(chapters, parentPath);
-
-    // 检查同级目录下是否存在同名文件夹，并生成副本名称
-    while (siblingItems.some(ch => ch.isFolder && ch.title === newFolderName)) {
-        newFolderNameBase = `${defaultFolderName}-副本${counter}`;
-        newFolderName = newFolderNameBase;
-        counter++;
-    }
-
-    await handleIPCAction('create-folder', parentPath ? `${parentPath}/${newFolderName}` : newFolderName);
+    const defaultFolderName = '新文件夹';
+    
+    // 不再使用前缀文件夹名，直接使用原始文件夹名
+    const newFilePath = parentPath ? `${parentPath}/${defaultFolderName}` : defaultFolderName;
+    await handleIPCAction('create-folder', newFilePath);
     handleCloseContextMenu();
-  }, [handleIPCAction, chapters, handleCloseContextMenu, getDisplayName]);
+  }, [handleIPCAction, handleCloseContextMenu]);
 
   const handleCopy = useCallback((itemId, isCut) => {
     if (isCut) {
@@ -438,18 +522,11 @@ function ChapterTreePanel() {
   }, [handleIPCAction, copiedItem, cutItem, handleCloseContextMenu]);
 
 
+
   // 递归渲染函数
   const renderChapterTree = useCallback((items, currentPath = '', level = 0) => {
-    // 1. 文件夹优先排序
-    const sortedItems = [...items].sort((a, b) => {
-      if (a.isFolder && !b.isFolder) {
-        return -1; // 文件夹排在文件前面
-      }
-      if (!a.isFolder && b.isFolder) {
-        return 1; // 文件排在文件夹后面
-      }
-      return a.title.localeCompare(b.title); // 相同类型按字母排序
-    });
+    // 使用后端排序
+    const sortedItems = items;
 
     return (
       <ul className="chapter-list">
@@ -457,7 +534,7 @@ function ChapterTreePanel() {
           const isCollapsed = collapsedChapters[item.id];
           const hasChildren = item.children && item.children.length > 0;
           const displayName = getDisplayName(item.title, item.isFolder);
-
+          const displayPrefix = getDisplayPrefix(item);
           return (
             <li
               key={item.id}
@@ -479,6 +556,42 @@ function ChapterTreePanel() {
                 {/* 文件/文件夹图标 */}
                 <FontAwesomeIcon icon={item.isFolder ? faFolder : faFile} className="item-icon" />
 
+                {/* 前缀显示/编辑区域 */}
+                <div className="prefix-section">
+                  {editingPrefix.itemId === item.id ? (
+                    <div className="prefix-edit-container">
+                      <input
+                        type="text"
+                        value={editingPrefix.prefix}
+                        onChange={(e) => setEditingPrefix(prev => ({ ...prev, prefix: e.target.value }))}
+                        className="prefix-edit-input"
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            handlePrefixEditConfirm();
+                          } else if (e.key === 'Escape') {
+                            handlePrefixEditCancel();
+                          }
+                        }}
+                        autoFocus
+                      />
+                      <button onClick={handlePrefixEditConfirm} className="prefix-edit-confirm">
+                        <FontAwesomeIcon icon={faCheck} />
+                      </button>
+                      <button onClick={handlePrefixEditCancel} className="prefix-edit-cancel">
+                        <FontAwesomeIcon icon={faTimes} />
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      className="prefix-display clickable"
+                      onClick={() => handlePrefixEdit(item.id, displayPrefix, item.isFolder, currentPath)}
+                      title="点击编辑前缀"
+                    >
+                      {displayPrefix}
+                    </span>
+                  )}
+                </div>
+
                 <button
                   onClick={() => handleChapterClick(item)}
                   className="chapter-title-button"
@@ -494,7 +607,7 @@ function ChapterTreePanel() {
         })}
       </ul>
     );
-  }, [collapsedChapters, handleContextMenu, handleChapterClick, getDisplayName]);
+  }, [collapsedChapters, handleContextMenu, handleChapterClick, getDisplayName, getDisplayPrefix, editingPrefix, handlePrefixEdit, handlePrefixEditConfirm, handlePrefixEditCancel]);
 
   const getContextMenuItems = useCallback(() => {
     const items = [];

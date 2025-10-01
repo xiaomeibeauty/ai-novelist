@@ -4,7 +4,7 @@ import NotificationModal from './NotificationModal';
 import ConfirmationModal from './ConfirmationModal';
 import './CustomProviderSettings.css';
 
-const CustomProviderSettings = () => {
+const CustomProviderSettings = ({ onSaveComplete }) => {
     const { getStoreValue, setStoreValue, reinitializeModelProvider } = useIpcRenderer();
     const [providers, setProviders] = useState([]);
     const [editingProvider, setEditingProvider] = useState(null);
@@ -34,6 +34,10 @@ const CustomProviderSettings = () => {
             if (result.success) {
                 setNotificationMessage('自定义提供商设置已保存！模型提供者已重新初始化，现在可以使用新的API密钥。');
                 setShowNotification(true);
+                // 通知父组件保存完成
+                if (onSaveComplete) {
+                    onSaveComplete();
+                }
             } else {
                 setNotificationMessage('自定义提供商设置已保存，但重新初始化模型提供者失败。可能需要重启应用。');
                 setShowNotification(true);

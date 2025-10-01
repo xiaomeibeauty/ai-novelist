@@ -32,6 +32,7 @@ const toolExecutor = require('../../tool-service/tools/executor');
 const tools = require('../../tool-service/tools/definitions'); // 引入 tools 定义，用于 send-user-response
 const { state, setMainWindow, setSessionState, getSessionState } = require('../../state-manager');
 const { getFileTree } = require('../../utils/file-tree-builder');
+const sortConfigManager = require('../../utils/sortConfigManager');
 const knowledgeBaseManager = require('../../rag-service/knowledgeBaseManager'); // 新增：导入知识库管理器
 const ragIpcHandler = require('../../rag-service/ragIpcHandler'); // 新增：导入RAG IPC处理器
 const intentAnalysisIpcHandler = require('../../rag-service/IntentAnalysisIpcHandler'); // 新增：导入意图分析IPC处理器
@@ -370,6 +371,17 @@ const handleDeleteKbFile = async (event, filename) => {
         return result;
     } catch (error) {
         console.error('[handlers.js] 删除知识库文件失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// 新增：处理重命名知识库文件请求
+const handleRenameKbFile = async (event, oldFilename, newFilename) => {
+    try {
+        const result = await knowledgeBaseManager.renameFile(oldFilename, newFilename);
+        return result;
+    } catch (error) {
+        console.error('[handlers.js] 重命名知识库文件失败:', error);
         return { success: false, error: error.message };
     }
 };
@@ -1041,6 +1053,26 @@ const handleCopyItem = async (event, sourceId, targetFolderId) => {
     }
 };
 
+
+// 处理更新项目排序顺序
+const handleUpdateItemOrder = async (event, { directoryPath, itemIds }) => {
+    const novelRootPath = getNovelPath();
+    
+    try {
+        // 确保排序配置管理器已初始化
+        await sortConfigManager.initialize(novelRootPath);
+        
+        // 设置自定义排序
+        await sortConfigManager.setCustomOrder(directoryPath, itemIds);
+        
+        await getChaptersAndUpdateFrontend(state.mainWindow);
+        return { success: true, message: '排序顺序更新成功' };
+    } catch (error) {
+        console.error(`[handlers.js] 更新排序顺序失败: ${directoryPath}`, error);
+        return { success: false, error: error.message };
+    }
+};
+
 // 处理移动项目请求 (相当于剪切+粘贴)
 const handleMoveItem = async (event, sourceId, targetFolderId) => {
     const novelRootPath = getNovelPath();
@@ -1241,6 +1273,44 @@ const handleListAllModels = async () => {
     }
 };
 
+// 新增：处理按提供商获取模型列表请求
+const handleGetModelsByProvider = async (event, providerId) => {
+    try {
+        console.log(`[handlers.js] handleGetModelsByProvider: 获取提供商 ${providerId} 的模型列表`);
+        
+        // 确保 ModelProvider 已初始化
+        await initializeModelProvider();
+        const modelRegistry = getModelRegistry();
+        
+        // 获取指定提供商的适配器
+        const adapter = modelRegistry.getAdapter(providerId);
+        if (!adapter) {
+            console.warn(`[handlers.js] 提供商 ${providerId} 的适配器未找到`);
+            return { success: true, models: [] }; // 返回空列表而不是错误
+        }
+        
+        // 获取该提供商的模型列表
+        const models = await adapter.listModels();
+        console.log(`[handlers.js] 提供商 ${providerId} 有 ${models.length} 个模型`);
+        
+        // 处理模型数据，添加提供商信息和标准化ID
+        const processedModels = models.map(model => ({
+            ...model,
+            id: modelRegistry._normalizeModelId(model.id, providerId),
+            provider: providerId
+        }));
+        
+        // 序列化模型数据
+        const serializableModels = JSON.parse(JSON.stringify(processedModels));
+        return { success: true, models: serializableModels };
+        
+    } catch (error) {
+        console.error(`[handlers.js] 获取提供商 ${providerId} 的模型列表失败:`, error);
+        // 返回空列表而不是错误，避免影响前端显示
+        return { success: true, models: [] };
+    }
+};
+
 // 新增：处理重新检测Ollama服务请求
 const handleRedetectOllama = async () => {
     try {
@@ -1248,18 +1318,37 @@ const handleRedetectOllama = async () => {
         
         // 获取当前的Ollama适配器
         const modelRegistry = getModelRegistry();
+        
+        // ✅ 修复：使用正确的适配器访问方式
         const ollamaAdapter = modelRegistry.adapters['ollama'];
         
         if (!ollamaAdapter) {
-            return { success: false, error: 'Ollama适配器未找到' };
+            console.warn('[handlers.js] Ollama适配器未找到，尝试重新创建适配器');
+            // 即使适配器不存在，也继续创建新的适配器
         }
 
-        // 尝试重新获取模型列表
-        const models = await ollamaAdapter.listModels();
-        console.log(`[handlers.js] 重新检测Ollama成功，获取到 ${models.length} 个模型`);
+        // ✅ 修复：重新创建适配器实例以刷新连接
+        const OllamaAdapter = require('../models/adapters/ollamaAdapter');
         
-        // 重新注册适配器以更新模型映射
-        await modelRegistry.registerAdapter('ollama', ollamaAdapter);
+        // 获取存储的Ollama基础URL设置
+        let ollamaBaseUrl = 'http://127.0.0.1:11434';
+        if (storeInstance) {
+            const storedUrl = storeInstance.get('ollamaBaseUrl');
+            if (storedUrl) {
+                ollamaBaseUrl = storedUrl;
+            }
+        }
+        
+        const newOllamaAdapter = new OllamaAdapter({
+            baseURL: ollamaBaseUrl
+        });
+
+        // ✅ 修复：重新注册新的适配器实例
+        await modelRegistry.registerAdapter('ollama', newOllamaAdapter);
+        
+        // 获取新的模型列表
+        const models = await newOllamaAdapter.listModels();
+        console.log(`[handlers.js] 重新检测Ollama成功，获取到 ${models.length} 个模型`);
         
         return { success: true, message: `Ollama服务重新检测成功，发现 ${models.length} 个模型` };
     } catch (error) {
@@ -1330,6 +1419,7 @@ function register(store) { // 接收 store 参数并设置全局实例
   ipcMain.handle('rename-item', handleRenameItem); // 修改：重命名文件/文件夹
   ipcMain.handle('copy-item', handleCopyItem); // 新增：复制文件/文件夹
   ipcMain.handle('move-item', handleMoveItem); // 新增：移动文件/文件夹 (剪切)
+  ipcMain.handle('update-item-order', handleUpdateItemOrder); // 新增：更新项目排序顺序
   ipcMain.handle('update-novel-title', handleUpdateNovelTitle); // 注册新的IPC处理器
   console.log('[handlers.js] register: 注册 save-novel-content 处理器...');
   ipcMain.handle('save-novel-content', handleSaveNovelContent);
@@ -1338,10 +1428,12 @@ function register(store) { // 接收 store 参数并设置全局实例
   ipcMain.handle('clear-ai-conversation', handleClearAiConversation); // 修改 IPC 处理器名称
   ipcMain.handle('list-all-models', handleListAllModels); // 新增：注册获取所有模型列表处理器
   ipcMain.handle('get-available-models', handleListAllModels); // 新增：注册get-available-models别名处理器
+  ipcMain.handle('get-models-by-provider', handleGetModelsByProvider); // 新增：注册按提供商获取模型列表处理器
   ipcMain.handle('redetect-ollama', handleRedetectOllama); // 新增：注册重新检测Ollama服务处理器
   ipcMain.handle('add-file-to-kb', handleAddFileToKb); // 新增：注册添加文件到知识库的处理器
   ipcMain.handle('list-kb-files', handleListKbFiles); // 新增：注册列出知识库文件处理器
   ipcMain.handle('delete-kb-file', handleDeleteKbFile); // 新增：注册删除知识库文件处理器
+  ipcMain.handle('rename-kb-file', handleRenameKbFile); // 新增：注册重命名知识库文件处理器
   
 
   // 新增：上下文限制设置处理器
@@ -1350,6 +1442,12 @@ function register(store) { // 接收 store 参数并设置全局实例
 
   // 新增：RAG检索状态设置处理器
   ipcMain.handle('set-rag-retrieval-enabled', handleSetRagRetrievalEnabled);
+
+  // 新增：排序配置处理器
+  ipcMain.handle('get-sort-config', handleGetSortConfig);
+  ipcMain.handle('set-sort-enabled', handleSetSortEnabled);
+  ipcMain.handle('set-custom-order', handleSetCustomOrder);
+  ipcMain.handle('clear-custom-order', handleClearCustomOrder);
 
   // ipcMain.handle('regenerate-response', async (event, { messageId }) => {
   //   try {
@@ -1641,6 +1739,24 @@ function register(store) { // 接收 store 参数并设置全局实例
     return await ragIpcHandler.reinitializeAliyunEmbedding();
   });
 
+  // 新增：获取知识库集合列表处理器
+  ipcMain.handle('list-kb-collections', async () => {
+    return await ragIpcHandler.listKbCollections();
+  });
+
+
+  // 新增：停止流式传输处理器
+  ipcMain.handle('stop-streaming', async () => {
+    try {
+      console.log('[handlers.js] 收到停止流式传输请求');
+      chatService.abortCurrentRequest();
+      simpleChatService.abortCurrentRequest();
+      return { success: true, message: '流式传输已停止' };
+    } catch (error) {
+      console.error('[handlers.js] 停止流式传输失败:', error);
+      return { success: false, error: error.message };
+    }
+  });
 
   // 新增：用于接收前端日志并输出到主进程终端
   ipcMain.on('main-log', (event, message) => {
@@ -1660,3 +1776,43 @@ exports.getChaptersAndUpdateFrontend = getChaptersAndUpdateFrontend; // 导出�
 exports.handleGetContextLimitSettings = handleGetContextLimitSettings; // 导出上下文限制设置获取函数
 exports.handleSetContextLimitSettings = handleSetContextLimitSettings; // 导出上下文限制设置保存函数
 exports.handleSetRagRetrievalEnabled = handleSetRagRetrievalEnabled; // 导出RAG检索状态设置函数
+// 处理排序配置相关请求
+const handleGetSortConfig = async () => {
+    try {
+        const config = sortConfigManager.getConfig();
+        return { success: true, config };
+    } catch (error) {
+        console.error('[handlers.js] 获取排序配置失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+const handleSetSortEnabled = async (event, enabled) => {
+    try {
+        await sortConfigManager.setSortEnabled(enabled);
+        return { success: true, enabled };
+    } catch (error) {
+        console.error('[handlers.js] 设置排序启用状态失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+const handleSetCustomOrder = async (event, { directoryPath, itemIds }) => {
+    try {
+        await sortConfigManager.setCustomOrder(directoryPath, itemIds);
+        return { success: true };
+    } catch (error) {
+        console.error('[handlers.js] 设置自定义排序失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+const handleClearCustomOrder = async (event, directoryPath) => {
+    try {
+        await sortConfigManager.clearCustomOrder(directoryPath);
+        return { success: true };
+    } catch (error) {
+        console.error('[handlers.js] 清除自定义排序失败:', error);
+        return { success: false, error: error.message };
+    }
+};

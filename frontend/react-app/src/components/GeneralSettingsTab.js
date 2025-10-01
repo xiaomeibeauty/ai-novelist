@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   setCustomPromptForMode,
@@ -7,14 +7,15 @@ import {
   resetModeFeatureSettings,
   setAdditionalInfoForMode,
   resetAdditionalInfoForMode,
-  setContextLimitSettings
+  setContextLimitSettings,
+  setShowGeneralSettingsModal
 } from '../store/slices/chatSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUndo, faSave } from '@fortawesome/free-solid-svg-icons';
 import useIpcRenderer from '../hooks/useIpcRenderer';
 import ModeContextSettings from './ModeContextSettings';
 
-const GeneralSettingsTab = ({ onSaveComplete }) => {
+const GeneralSettingsTab = forwardRef(({ onSaveComplete }, ref) => {
   const dispatch = useDispatch();
   const { invoke, getStoreValue } = useIpcRenderer();
   const { customPrompts, modeFeatureSettings, additionalInfo } = useSelector((state) => state.chat);
@@ -148,6 +149,7 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
     }));
   };
 
+  // 功能设置变更处理（现在主要用于其他功能，RAG设置已移到专门页面）
   const handleFeatureSettingChange = (mode, feature, enabled) => {
     setLocalFeatureSettings(prev => ({
       ...prev,
@@ -175,9 +177,7 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
     }));
     setLocalFeatureSettings(prev => ({
       ...prev,
-      [mode]: {
-        ragRetrievalEnabled: false
-      }
+      [mode]: {}
     }));
     setLocalAdditionalInfo(prev => ({
       ...prev,
@@ -204,12 +204,12 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
         console.log(`[GeneralSettingsTab] 保存模式 ${mode} 的自定义提示词: ${localPrompts[mode] ? '有内容' : '空'}`);
       }
       
-      // 保存所有模式的功能设置
+      // 保存所有模式的功能设置（现在只保存其他功能设置，RAG设置已移到专门页面）
       for (const mode of Object.keys(localFeatureSettings)) {
         const settings = localFeatureSettings[mode];
-        console.log(`[GeneralSettingsTab] 保存模式 ${mode} 的功能设置: ragRetrievalEnabled=${settings.ragRetrievalEnabled}`);
+        console.log(`[GeneralSettingsTab] 保存模式 ${mode} 的功能设置:`, settings);
         
-        dispatch(setModeFeatureSetting({ mode, feature: 'ragRetrievalEnabled', enabled: settings.ragRetrievalEnabled }));
+        // 这里可以保存其他功能设置，RAG设置现在在专门页面处理
       }
       
       // 保存所有模式的附加信息
@@ -254,10 +254,13 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
     return names[mode] || mode;
   };
 
+  // 暴露保存方法给父组件
+  useImperativeHandle(ref, () => ({
+    handleSave
+  }));
+
   return (
     <div className="tab-content">
-      <h3>通用设置</h3>
-      
       {isLoadingPrompts ? (
         <div className="loading-prompts">
           <p>正在加载默认提示词...</p>
@@ -293,8 +296,7 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
                 <button
                   className="reset-button"
                   onClick={() => handleReset(mode)}
-                  disabled={!localPrompts[mode] &&
-                           !localFeatureSettings[mode]?.ragRetrievalEnabled}
+                  disabled={!localPrompts[mode]}
                 >
                   <FontAwesomeIcon icon={faUndo} /> 重置
                 </button>
@@ -320,18 +322,6 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
                   </div>
                 )}
 
-                <div className="feature-toggle">
-                  <input
-                    type="checkbox"
-                    id={`${mode}-rag`}
-                    checked={localFeatureSettings[mode]?.ragRetrievalEnabled || false}
-                    onChange={(e) => handleFeatureSettingChange(mode, 'ragRetrievalEnabled', e.target.checked)}
-                  />
-                  <label htmlFor={`${mode}-rag`}>启用RAG检索</label>
-                </div>
-                <div className="feature-description">
-                  在此模式下允许AI使用知识库检索功能获取相关信息
-                </div>
 
                 {/* 单个模式的上下文设置 */}
                 <ModeContextSettings mode={mode} modeName={getModeDisplayName(mode)} />
@@ -342,13 +332,8 @@ const GeneralSettingsTab = ({ onSaveComplete }) => {
       )}
 
 
-      <div className="modal-actions" style={{ marginTop: '20px' }}>
-        <button className="save-button" onClick={handleSave}>
-          保存
-        </button>
-      </div>
     </div>
   );
-};
+});
 
 export default GeneralSettingsTab;

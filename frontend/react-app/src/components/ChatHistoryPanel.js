@@ -3,7 +3,7 @@ import { useDispatch } from 'react-redux'; // 导入 useDispatch
 import { setIsHistoryPanelVisible } from '../store/slices/chatSlice'; // 导入对应的 action
 import './ChatHistoryPanel.css';
 
-const ChatHistoryPanel = memo(({ history, onSelectConversation, onDeleteConversation, isDeleteMode }) => {
+const ChatHistoryPanel = memo(({ history, onSelectConversation, onDeleteConversation }) => {
     const dispatch = useDispatch(); // 获取 dispatch 函数
 
     const handleClosePanel = () => {
@@ -31,14 +31,12 @@ const ChatHistoryPanel = memo(({ history, onSelectConversation, onDeleteConversa
                                     {conv && conv.messages && Array.isArray(conv.messages) && conv.messages.length > 0 ?
                                         (conv.messages[0].content || conv.messages[0].text || '[无内容]').substring(0, 20) : '无内容'}...
                                 </span>
-                                {isDeleteMode && (
-                                    <button 
-                                        className="delete-button" 
-                                        onClick={() => onDeleteConversation(conv.sessionId)}
-                                    >
-                                        &times;
-                                    </button>
-                                )}
+                                <button
+                                    className="delete-button"
+                                    onClick={() => onDeleteConversation(conv.sessionId)}
+                                >
+                                    &times;
+                                </button>
                             </li>
                         );
                     })}

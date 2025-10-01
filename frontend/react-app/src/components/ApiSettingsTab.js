@@ -1,18 +1,21 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import {
   setSelectedModel,
   setSelectedProvider,
   setDeepseekApiKey,
   setOpenrouterApiKey,
+  setSiliconflowApiKey,
   setAliyunEmbeddingApiKey,
   setIntentAnalysisModel,
-  setAvailableModels
+  setAvailableModels,
+  setOllamaBaseUrl,
+  setShowApiSettingsModal
 } from '../store/slices/chatSlice';
 import useIpcRenderer from '../hooks/useIpcRenderer';
-import CustomProviderSettings from './CustomProviderSettings';
+import ProviderSettingsPanel from './ProviderSettingsPanel';
 
-const ApiSettingsTab = ({ onSaveComplete }) => {
+const ApiSettingsTab = forwardRef(({ onSaveComplete }, ref) => {
   const dispatch = useDispatch();
   const { invoke, setStoreValue, reinitializeModelProvider, reinitializeAliyunEmbedding } = useIpcRenderer();
   const {
@@ -20,22 +23,35 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
     selectedProvider,
     deepseekApiKey,
     openrouterApiKey,
+    siliconflowApiKey,
     aliyunEmbeddingApiKey,
     intentAnalysisModel,
-    availableModels
+    availableModels,
+    ollamaBaseUrl
   } = useSelector((state) => state.chat);
 
   // 加载设置
   const loadSettings = useCallback(async () => {
     try {
       // 从存储加载保存的设置
-      const [storedModel, storedProvider, storedDeepseekKey, storedOpenrouterKey, storedAliyunKey, storedIntentModel] = await Promise.all([
+      const [
+        storedModel,
+        storedProvider,
+        storedDeepseekKey,
+        storedOpenrouterKey,
+        storedSiliconflowKey,
+        storedAliyunKey,
+        storedIntentModel,
+        storedOllamaUrl
+      ] = await Promise.all([
         invoke('get-store-value', 'selectedModel'),
         invoke('get-store-value', 'selectedProvider'),
         invoke('get-store-value', 'deepseekApiKey'),
         invoke('get-store-value', 'openrouterApiKey'),
+        invoke('get-store-value', 'siliconflowApiKey'),
         invoke('get-store-value', 'aliyunEmbeddingApiKey'),
-        invoke('get-store-value', 'intentAnalysisModel')
+        invoke('get-store-value', 'intentAnalysisModel'),
+        invoke('get-store-value', 'ollamaBaseUrl')
       ]);
 
       // 更新Redux store中的设置
@@ -51,17 +67,27 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
       if (storedOpenrouterKey) {
         dispatch(setOpenrouterApiKey(storedOpenrouterKey));
       }
+      if (storedSiliconflowKey) {
+        dispatch(setSiliconflowApiKey(storedSiliconflowKey));
+      }
       if (storedAliyunKey) {
         dispatch(setAliyunEmbeddingApiKey(storedAliyunKey));
       }
       if (storedIntentModel) {
         dispatch(setIntentAnalysisModel(storedIntentModel));
       }
+      if (storedOllamaUrl) {
+        dispatch(setOllamaBaseUrl(storedOllamaUrl));
+      }
 
       // 加载可用模型列表
       const models = await invoke('get-available-models');
       if (models.success) {
         dispatch(setAvailableModels(models.models));
+        console.log(`[API设置] 加载到 ${models.models.length} 个模型`);
+      } else {
+        console.warn('[API设置] 获取模型列表失败，使用空列表:', models.error);
+        dispatch(setAvailableModels([]));
       }
     } catch (error) {
       console.error('加载设置失败:', error);
@@ -71,21 +97,6 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
-
-  const handleProviderChange = (e) => {
-    const provider = e.target.value;
-    dispatch(setSelectedProvider(provider));
-    
-    // 自动选择该提供商的第一个模型
-    const providerModels = availableModels.filter(model => model.provider === provider);
-    if (providerModels.length > 0) {
-      dispatch(setSelectedModel(providerModels[0].id));
-    }
-  };
-
-  const handleModelChange = (e) => {
-    dispatch(setSelectedModel(e.target.value));
-  };
 
   const handleExternalLinkClick = (url, e) => {
     e.preventDefault();
@@ -112,7 +123,9 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
         selectedProvider,
         deepseekApiKey: deepseekApiKey ? '已设置(隐藏)' : '未设置',
         openrouterApiKey: openrouterApiKey ? '已设置(隐藏)' : '未设置',
+        siliconflowApiKey: siliconflowApiKey ? '已设置(隐藏)' : '未设置',
         aliyunEmbeddingApiKey: aliyunEmbeddingApiKey ? '已设置(隐藏)' : '未设置',
+        ollamaBaseUrl,
         intentAnalysisModel
       });
 
@@ -120,7 +133,9 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
       await Promise.all([
         setStoreValue('deepseekApiKey', deepseekApiKey),
         setStoreValue('openrouterApiKey', openrouterApiKey),
+        setStoreValue('siliconflowApiKey', siliconflowApiKey),
         setStoreValue('aliyunEmbeddingApiKey', aliyunEmbeddingApiKey),
+        setStoreValue('ollamaBaseUrl', ollamaBaseUrl),
         setStoreValue('intentAnalysisModel', intentAnalysisModel),
         setStoreValue('selectedModel', selectedModel),
         setStoreValue('selectedProvider', selectedProvider)
@@ -129,7 +144,8 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
       console.log('[API设置保存] 存储保存完成，保存的值:', {
         selectedModel,
         selectedProvider,
-        intentAnalysisModel
+        intentAnalysisModel,
+        ollamaBaseUrl
       });
 
       // 重新初始化API提供者以确保新设置立即生效
@@ -164,135 +180,17 @@ const ApiSettingsTab = ({ onSaveComplete }) => {
     }
   };
 
+  // 暴露保存方法给父组件
+  useImperativeHandle(ref, () => ({
+    handleSave
+  }));
+
   return (
     <div className="tab-content">
-      <h3>API设置</h3>
-      
-      {/* 对话模型部分 */}
-      <div className="settings-section">
-        <h4>对话模型</h4>
-        
-        <div className="setting-item">
-          <label htmlFor="providerSelect">选择提供商:</label>
-          <select
-            id="providerSelect"
-            value={selectedProvider || ''}
-            onChange={handleProviderChange}
-          >
-            {[...new Set(availableModels.map(model => model.provider))].map(provider => (
-              <option key={provider} value={provider}>
-                {provider.charAt(0).toUpperCase() + provider.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {selectedProvider === 'deepseek' && (
-          <div className="setting-item">
-            <label htmlFor="deepseekApiKey">DeepSeek API Key:</label>
-            <input
-              type="text"
-              id="deepseekApiKey"
-              value={deepseekApiKey || ''}
-              onChange={(e) => dispatch(setDeepseekApiKey(e.target.value))}
-              placeholder="请输入您的 DeepSeek API Key"
-            />
-          </div>
-        )}
-
-        {selectedProvider === 'openrouter' && (
-          <div className="setting-item">
-            <label htmlFor="openrouterApiKey">OpenRouter API Key:</label>
-            <input
-              type="text"
-              id="openrouterApiKey"
-              value={openrouterApiKey || ''}
-              onChange={(e) => dispatch(setOpenrouterApiKey(e.target.value))}
-              placeholder="请输入您的 OpenRouter API Key"
-            />
-          </div>
-        )}
-
-        <div className="setting-item">
-          <label htmlFor="modelSelect">正文生成模型:</label>
-          <select
-            id="modelSelect"
-            value={selectedModel || ''}
-            onChange={handleModelChange}
-          >
-            {availableModels
-              .filter(model => model.provider === selectedProvider)
-              .map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.id}
-                </option>
-              ))}
-          </select>
-        </div>
-
-        <div className="setting-item">
-          <label>Ollama服务重连（仅使用ollama但无服务时使用）:</label>
-          <button
-            onClick={handleRedetectOllama}
-            className="redetect-button"
-            title="如果忘记先启动Ollama服务，点击此按钮重新检测"
-          >
-            重新检测Ollama服务
-          </button>
-          <div className="setting-description">
-            如果忘记先启动Ollama服务，点击此按钮重新检测。请确保Ollama服务已启动。
-          </div>
-        </div>
-      </div>
-
-      {/* RAG模型部分 */}
-      <div className="settings-section">
-        <h4>RAG模型</h4>
-        
-        <div className="setting-item">
-          <label htmlFor="aliyunEmbeddingApiKey">阿里云嵌入API Key:</label>
-          <input
-            type="password"
-            id="aliyunEmbeddingApiKey"
-            value={aliyunEmbeddingApiKey || ''}
-            onChange={(e) => dispatch(setAliyunEmbeddingApiKey(e.target.value))}
-            placeholder="请输入您的阿里云嵌入API Key"
-          />
-          <div className="setting-description">
-            用于RAG功能的文本嵌入模型，获取地址：<a href="https://www.aliyun.com/product/bailian" onClick={(e) => handleExternalLinkClick('https://www.aliyun.com/product/bailian', e)} style={{cursor: 'pointer', color: '#007acc', textDecoration: 'underline'}}>阿里云百炼</a>
-          </div>
-        </div>
-
-        <div className="setting-item">
-          <label htmlFor="intentAnalysisModel">意图分析模型:</label>
-          <select
-            id="intentAnalysisModel"
-            value={intentAnalysisModel || ''}
-            onChange={(e) => dispatch(setIntentAnalysisModel(e.target.value))}
-          >
-            <option value="">使用默认模型（自动选择）</option>
-            {availableModels.map(model => (
-              <option key={model.id} value={model.id}>
-                {model.name} ({model.provider})
-              </option>
-            ))}
-          </select>
-          <div className="setting-description">
-            用于分析写作意图和生成检索词的AI模型
-          </div>
-        </div>
-
-        {/* 自定义提供商设置组件 */}
-        <CustomProviderSettings />
-      </div>
-
-      <div className="modal-actions" style={{ marginTop: '20px' }}>
-        <button className="save-button" onClick={handleSave}>
-          保存
-        </button>
-      </div>
+      {/* 使用新的分栏布局 */}
+      <ProviderSettingsPanel />
     </div>
   );
-};
+});
 
 export default ApiSettingsTab;

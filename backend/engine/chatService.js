@@ -74,6 +74,7 @@ function buildSystemPrompt(basePrompt, options = {}) {
 // 服务级别的状态，用于存储持久化设置
 const serviceState = {
     isStreaming: true, // 默认为流式
+    abortController: null, // 新增：用于中止请求的控制器
 };
 
 function setStreamingMode({ stream }) {
@@ -84,6 +85,20 @@ function setStreamingMode({ stream }) {
 // 新增 getter 函数以安全地暴露状态
 function getStreamingMode() {
     return serviceState.isStreaming;
+}
+
+// 新增：设置中止控制器
+function setAbortController(controller) {
+    serviceState.abortController = controller;
+}
+
+// 新增：中止当前请求
+function abortCurrentRequest() {
+    if (serviceState.abortController) {
+        serviceState.abortController.abort();
+        console.log('[ChatService] 已中止当前请求');
+        serviceState.abortController = null;
+    }
 }
 
 let aiResponseSendCount = 0;
@@ -240,8 +255,21 @@ async function* chatWithAI(messages, modelId, customSystemPrompt, mode = 'genera
        
        // RAG检索控制：只有在启用时才执行检索
        if (lastUserMessage && lastUserMessage.content && ragRetrievalEnabled) {
-           // 使用增强的检索功能，启用意图分析，并传递当前模式
-           const retrievalResult = await retriever.retrieve(messages, 3, true, mode);
+           // 获取当前模式的RAG集合选择设置
+           let ragCollectionNames = [];
+           try {
+               const storeInstance = await getStoreInstance();
+               const modeFeatureSettings = storeInstance.get('modeFeatureSettings') || {};
+               const currentModeSettings = modeFeatureSettings[mode] || {};
+               ragCollectionNames = currentModeSettings.ragCollectionNames || [];
+               
+               console.log(`[ChatService] RAG集合选择设置 - 模式: ${mode}, 选择的集合:`, ragCollectionNames);
+           } catch (error) {
+               console.warn('[ChatService] 获取RAG集合设置失败，使用所有集合:', error.message);
+           }
+           
+           // 使用增强的检索功能，启用意图分析，并传递当前模式和选择的集合
+           const retrievalResult = await retriever.retrieve(messages, 3, true, mode, ragCollectionNames);
             
             if (retrievalResult.documents && retrievalResult.documents.length > 0) {
                 retrievalInfo = retrievalResult;
@@ -344,12 +372,32 @@ ${retrievalResult.documents.map(doc => `- ${doc}`).join('\n')}\n`;
 
        console.log(`[ChatService] chatWithAI - 工具功能已强制启用`);
        
-       const aiResponse = await adapter.generateCompletion(sanitizedMessages, {
-            model: modelId,
-            tools: tools, // 始终启用工具
-            tool_choice: "auto", // 始终自动选择工具
-            stream: serviceState.isStreaming // 使用服务级别状态
-        });
+       // 完整的请求参数（服务层显示完整参数，但让适配器处理实际值）
+       const requestOptions = {
+           model: modelId,
+           tools: tools, // 始终启用工具
+           tool_choice: "auto", // 始终自动选择工具
+           stream: serviceState.isStreaming, // 使用服务级别状态
+           temperature: 0.7,
+           top_p: 0.7,
+           n: 1,
+           enable_thinking: false,
+           thinking_budget: 4096
+       };
+       
+       // 打印完整的请求参数（服务层显示）
+       console.log('[ChatService] 服务层请求参数:', JSON.stringify(requestOptions, null, 2));
+       
+       // 实际传递给适配器的参数（让适配器处理默认值）
+       const adapterOptions = {
+           model: modelId,
+           tools: tools,
+           tool_choice: "auto",
+           stream: serviceState.isStreaming
+           // 其他参数由适配器处理默认值
+       };
+       
+       const aiResponse = await adapter.generateCompletion(sanitizedMessages, adapterOptions);
 
         let fullAssistantContent = "";
         let finalToolCalls = [];
@@ -704,13 +752,32 @@ async function* sendToolResultToAI(toolResultsArray, modelId, customSystemPrompt
 
         console.log(`[ChatService] sendToolResultToAI - 工具功能已强制启用`);
         
-        // **关键修改**: 启用流式传输
-        const aiResponse = await adapter.generateCompletion(sanitizedMessages, {
+        // 完整的请求参数（服务层显示完整参数，但让适配器处理实际值）
+        const requestOptions = {
             model: modelId,
             tools: tools, // 始终启用工具
             tool_choice: "auto", // 始终自动选择工具
             stream: serviceState.isStreaming, // 使用服务级别状态
-        });
+            temperature: 0.7,
+            top_p: 0.7,
+            n: 1,
+            enable_thinking: false,
+            thinking_budget: 4096
+        };
+        
+        // 打印完整的请求参数（服务层显示）
+        console.log('[ChatService] 服务层请求参数:', JSON.stringify(requestOptions, null, 2));
+        
+        // 实际传递给适配器的参数（让适配器处理默认值）
+        const adapterOptions = {
+            model: modelId,
+            tools: tools,
+            tool_choice: "auto",
+            stream: serviceState.isStreaming
+            // 其他参数由适配器处理默认值
+        };
+        
+        const aiResponse = await adapter.generateCompletion(sanitizedMessages, adapterOptions);
 
         // 复用 chatWithAI 的流式处理逻辑
         let fullAssistantContent = "";
@@ -895,8 +962,21 @@ async function processUserMessage(message, sessionId, currentMessages, mode, cus
     );
 
     try {
+        // 创建AbortController用于停止功能
+        const abortController = new AbortController();
+        setAbortController(abortController);
+        
+        // 通知前端开始流式传输
+        _sendAiResponseToFrontend('streaming_started', { sessionId: sessionId });
+        
         const stream = chatWithAI(validHistory, defaultModelId, customPrompt, mode, ragRetrievalEnabled);
         for await (const chunk of stream) {
+            // 检查是否被中止
+            if (abortController.signal.aborted) {
+                console.log('[ChatService] 请求已被中止，停止处理流式响应');
+                break;
+            }
+            
             if (chunk.type === 'text') {
                 if (getStreamingMode()) {
                     _sendAiResponseToFrontend('text_stream', { content: chunk.content, sessionId: sessionId });
@@ -914,12 +994,21 @@ async function processUserMessage(message, sessionId, currentMessages, mode, cus
                 }
             }
         }
-        if (getStreamingMode()) {
+        if (getStreamingMode() && !abortController.signal.aborted) {
             _sendAiResponseToFrontend('text_stream_end', null);
         }
+        
+        // 通知前端流式传输已结束
+        _sendAiResponseToFrontend('streaming_ended', { sessionId: sessionId });
+        
+        // 清理AbortController
+        setAbortController(null);
+        
     } catch (error) {
         console.error('调用聊天服务失败:', error);
         _sendAiResponseToFrontend('error', `调用聊天服务失败: ${error.message}`);
+        // 清理AbortController
+        setAbortController(null);
     }
 }
 
@@ -961,4 +1050,6 @@ module.exports = {
     // regenerateResponse,
     // editMessage,
     processUserMessage,
+    abortCurrentRequest, // 新增：导出停止功能
+    setAbortController, // 新增：导出设置中止控制器
 }

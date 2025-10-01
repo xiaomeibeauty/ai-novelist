@@ -2,11 +2,7 @@
 
 [中文版](CONTRIBUTING.md) | English Version
 
-We warmly welcome and thank you for your contributions to the AI Novelist MVP project! Please read this guide carefully before submitting your contributions.
-
-## Code of Conduct
-
-We are committed to creating an open and inclusive community. Please read our Code of Conduct (to be supplemented) to understand our expectations for all contributors.
+We warmly welcome and thank you for your contributions to this project! This is an open and inclusive community, and we look forward to your participation.
 
 ## How to Contribute
 
@@ -38,42 +34,26 @@ We welcome code contributions! Please follow these steps:
     git checkout -b feature/your-feature-name
     ```
 4.  **Make Changes**: Write your code and test it.
-5.  **Commit Changes and Sign DCO**:
-    This project adopts the **Developer Certificate of Origin (DCO)**. All contributions must be accompanied by a `Signed-off-by` line in the commit message to certify that you agree to the DCO. This indicates that you have the right to submit your contribution and agree that your contribution will be released under the project's open-source license.
-
-    You can use the `-s` or `--signoff` option to sign off your commit:
+5.  **Commit Changes**: Commit your changes.
     ```bash
-    git commit -s -m "feat: Add your feature"
+    git commit -m "feat: Add your feature"
     ```
-    Your commit message will include something like:
-    ```
-    Your commit message
-
-    Signed-off-by: Your Name <your.email@example.com>
-    ```
-    Please ensure that `Your Name` and `your.email@example.com` match your Git configuration and actual information.
-
-    To ensure the legal clarity and maintainability of the project, please note:
-
-    *   **License Compatibility**: All submitted code must be original or explicitly compatible with the [MIT License](LICENSE). **Strictly prohibit the introduction of any GPL, AGPL, or other Copyleft licensed code**, as these licenses may "infect" and force the entire project to be open source.
-
 6.  **Push Branch**: Push your changes to your forked repository.
     ```bash
     git push origin feature/your-feature-name
     ```
 7.  **Create a Pull Request**: Create a Pull Request on GitHub, from your forked branch to the main branch of this project. Please describe your changes in detail.
 
+## Contribution Rules
+
+To ensure the healthy development of the project, please follow these basic rules:
+
+- **License Compatibility**: All submitted code must be original or explicitly compatible with the [MIT License](LICENSE). **Strictly prohibit the introduction of any GPL, AGPL, or other Copyleft licensed code**, as these licenses may impose restrictions on the project.
+
+- **Code Quality**: Please ensure your code has good readability and maintainability.
+
+- **Test Coverage**: If possible, please add corresponding tests for your changes.
+
 ## License
 
 This project uses the [MIT License](LICENSE). The MIT License explicitly permits commercial use, modification, distribution, and private deployment.
-
-**Commercial Use Statement**:
-- This project's code may be used for commercial purposes, including but not limited to SaaS services, product integration, commercial distribution, etc.
-- Contributors confirm through DCO signing that their code is licensed under the MIT License
-- Project maintainers reserve the right to develop commercial products and services based on this project
-
-## CLA Policy (Future Consideration)
-
-Currently, this project does not mandate contributors to sign a CLA (Contributor License Agreement). All contributions will be protected under the MIT License.
-
-However, if the project receives commercial investment or requires more stringent intellectual property management in the future, we may consider introducing a CLA. At that time, all new contributions will require signing a CLA. Before introducing a CLA, we will publish notices in this guide and on the project homepage, and provide detailed signing procedures. For existing non-CLA contributions, we will properly handle intellectual property ownership issues under the guidance of legal counsel.

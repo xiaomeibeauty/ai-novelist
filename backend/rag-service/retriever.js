@@ -88,9 +88,11 @@ class Retriever {
      * @param {Array} messages 完整的对话消息数组
      * @param {number} topK 返回的最相关结果数量
      * @param {boolean} enableAnalysis 是否启用意图分析
+     * @param {string} mode 当前模式
+     * @param {Array} collectionNames 要查询的集合名称数组（空数组表示查询所有集合）
      * @returns {Promise<Array<string>>} 返回文档片段内容数组
      */
-    async retrieve(messages, topK = 3, enableAnalysis = true, mode = 'general') {
+    async retrieve(messages, topK = 3, enableAnalysis = true, mode = 'general', collectionNames = []) {
         if (!this.isInitialized) {
             await this.initialize();
         }
@@ -149,8 +151,8 @@ class Retriever {
 
             console.log(`[Retriever] 正在执行查询: "${finalQuery}"`);
             
-            // 使用 knowledgeBaseManager 的查询方法
-            const results = await knowledgeBaseManager.queryCollection(finalQuery, topK);
+            // 使用 knowledgeBaseManager 的查询方法，支持指定集合
+            const results = await knowledgeBaseManager.queryCollection(finalQuery, topK, collectionNames);
 
             if (results && results.documents && results.documents.length > 0) {
                 console.log(`[Retriever] 检索到 ${results.documents.length} 个相关片段。`);
